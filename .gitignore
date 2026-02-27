@@ -12,6 +12,7 @@ yarn-error.log*
 # ─── Firebase ───────────────────────────────────────────────────────────────
 serviceAccountKey.json
 *-firebase-adminsdk-*.json
+.test-token.txt
 
 # ─── Python ─────────────────────────────────────────────────────────────────
 __pycache__/

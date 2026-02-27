@@ -9,6 +9,7 @@ import express from "express";
 import cors from "cors";
 
 import healthRouter from "./routes/health.js";
+import userRouter from "./routes/user.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
@@ -42,9 +43,9 @@ app.use(
 
 app.use("/api/health", healthRouter);
 
-// Additional feature routers will be mounted here in future sprints:
-// app.use("/api/users",   userRouter);
-// app.use("/api/auth",    authRouter);
+// User routes — provides /api/profile and (future) /api/users/* endpoints.
+// Mounted at /api so the router controls the full path for each resource.
+app.use("/api", userRouter);
 
 // ─── Error Handlers (must be registered last) ────────────────────────────────
 
