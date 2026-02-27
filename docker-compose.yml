@@ -1,0 +1,41 @@
+version: "3.9"
+
+# ─── Wuloye — Docker Compose ─────────────────────────────────────────────────
+# Orchestrates the backend API and AI microservice.
+# Mobile and admin-dashboard are excluded here (client-side / Expo managed).
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Node.js / Express Backend ──────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: wuloye-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    environment:
+      - NODE_ENV=production
+    networks:
+      - wuloye-network
+
+  # ── Python / FastAPI AI Service ────────────────────────────────────────────
+  ai-service:
+    build:
+      context: ./ai-service
+      dockerfile: Dockerfile
+    container_name: wuloye-ai-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    networks:
+      - wuloye-network
+
+# ─── Shared Network ──────────────────────────────────────────────────────────
+networks:
+  wuloye-network:
+    driver: bridge
