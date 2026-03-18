@@ -13,6 +13,7 @@ import userRouter from "./routes/user.routes.js";
 import routineRouter from "./routes/routine.routes.js";
 import interactionRouter from "./routes/interaction.routes.js";
 import recommendationRouter from "./routes/recommendation.routes.js";
+import devRouter from "./routes/dev.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
@@ -58,6 +59,12 @@ app.use("/api/interactions", interactionRouter);
 
 // Recommendation routes — personalised ranked place list under /api/recommendations
 app.use("/api/recommendations", recommendationRouter);
+
+// Dev routes — seeding and inspection tools, only active outside production
+if (process.env.NODE_ENV !== "production") {
+  app.use("/api/dev", devRouter);
+  console.log("[app] Dev routes mounted at /api/dev (NODE_ENV:", process.env.NODE_ENV ?? "development", ")");
+}
 
 // ─── Error Handlers (must be registered last) ────────────────────────────────
 

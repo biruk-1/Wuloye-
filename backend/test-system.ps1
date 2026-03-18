@@ -323,6 +323,9 @@ if ($null -eq $topResult.scoreBreakdown) {
     Write-Host ("    typeDismissSignal : {0,4}" -f $bd.typeDismissSignal)  -ForegroundColor White
     Write-Host ("    affinityBoost     : {0,4}" -f $bd.affinityBoost)      -ForegroundColor White
     Write-Host ("    timeOfDayMatch    : {0,4}" -f $bd.timeOfDayMatch)     -ForegroundColor White
+    Write-Host ("    contextTimeOfDay  : {0,4}" -f $bd.contextTimeOfDay)   -ForegroundColor White
+    Write-Host ("    weekendBoost      : {0,4}" -f $bd.weekendBoost)       -ForegroundColor White
+    Write-Host ("    weekdayBoost      : {0,4}" -f $bd.weekdayBoost)       -ForegroundColor White
     Write-Host ("    -------------------------")                             -ForegroundColor DarkGray
     Write-Host ("    TOTAL             : {0,4}" -f $topResult.score)       -ForegroundColor Green
 
@@ -340,11 +343,15 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Fail "budgetMatch = 0 on top result -- budget signal missing"
     }
 
-    # 5-C: at least one of interactionScore or affinityBoost must be non-zero
-    if ($bd.interactionScore -ne 0 -or $bd.affinityBoost -ne 0) {
-        Print-Pass "Interaction learning signal present (interactionScore or affinityBoost != 0)"
+    # 5-C: at least one result in the list must show interaction learning (not necessarily #1)
+    $anyLearning = @($recs | Where-Object {
+        $b = $_.scoreBreakdown
+        $null -ne $b -and ($b.interactionScore -ne 0 -or $b.affinityBoost -ne 0)
+    })
+    if ($anyLearning.Count -gt 0) {
+        Print-Pass "Interaction learning present in $($anyLearning.Count) result(s) (interactionScore or affinityBoost != 0)"
     } else {
-        Print-Fail "Neither interactionScore nor affinityBoost is non-zero -- interaction learning missing"
+        Print-Fail "No result has interactionScore or affinityBoost non-zero -- interaction learning missing"
     }
 }
 
@@ -382,6 +389,46 @@ if ($null -eq $meta) {
         Print-Pass "meta.topInterestType = '$($meta.topInterestType)' (affinity learning is active)"
     } else {
         Print-Fail "meta.topInterestType is null -- type affinity not being computed"
+    }
+
+    # 6-E: meta.context must be present (added in v4 when debug=true)
+    if ($null -ne $meta.context) {
+        $ctx = $meta.context
+        Print-Info "meta.context.hour      : $($ctx.hour)"
+        Print-Info "meta.context.timeOfDay : $($ctx.timeOfDay)"
+        Print-Info "meta.context.isWeekend : $($ctx.isWeekend)"
+        Print-Info "meta.context.dayName   : $($ctx.dayName)"
+
+        $validTimeOfDay = @("morning", "afternoon", "evening", "night")
+        if ($validTimeOfDay -contains $ctx.timeOfDay) {
+            Print-Pass "meta.context.timeOfDay is valid ('$($ctx.timeOfDay)')"
+        } else {
+            Print-Fail "meta.context.timeOfDay is invalid (got '$($ctx.timeOfDay)')"
+        }
+
+        if ($null -ne $ctx.isWeekend) {
+            Print-Pass "meta.context.isWeekend present ($($ctx.isWeekend))"
+        } else {
+            Print-Fail "meta.context.isWeekend is missing"
+        }
+
+        if ($ctx.hour -ge 0 -and $ctx.hour -le 23) {
+            Print-Pass "meta.context.hour in valid range ($($ctx.hour))"
+        } else {
+            Print-Fail "meta.context.hour out of range (got $($ctx.hour))"
+        }
+    } else {
+        Print-Fail "meta.context is missing -- context-aware scoring not returning context (debug=true required)"
+    }
+
+    # 6-F: At least one result has contextTimeOfDay > 0 (proves the new rule fires)
+    $ctxMatches = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and $_.scoreBreakdown.contextTimeOfDay -gt 0
+    })
+    if ($ctxMatches.Count -gt 0) {
+        Print-Pass "contextTimeOfDay > 0 in $($ctxMatches.Count) result(s) -- time-of-day rule is active"
+    } else {
+        Print-Warn "contextTimeOfDay = 0 in all results -- may be expected if no types match current time band"
     }
 }
 

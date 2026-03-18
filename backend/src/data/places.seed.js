@@ -1,0 +1,299 @@
+/**
+ * src/data/places.seed.js — Canonical seed dataset for the places collection.
+ *
+ * Imported by:
+ *   - scripts/seedPlaces.js     (standalone Node runner)
+ *   - src/controllers/dev.controller.js  (POST /api/dev/seed-places)
+ *
+ * Each entry is validated by place.service.js seedPlacesIfEmpty() before
+ * being written to Firestore, so invalid entries will throw early.
+ *
+ * The first 12 entries match the legacy MOCK_PLACES array that was previously
+ * hard-coded in recommendation.service.js.  Keeping the same names ensures
+ * that historical interactions (stored with place_1 … place_12) still resolve
+ * correctly once the recommendation engine is migrated to dynamic place lookup.
+ */
+
+export const SEED_PLACES = [
+  // ── Gyms ──────────────────────────────────────────────────────────────────
+  {
+    id:              "place_1",
+    name:            "Downtown Gym",
+    type:            "gym",
+    location:        { lat: 9.0249, lng: 38.7469, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["weights", "cardio", "locker-room"],
+    rating:          4.2,
+    popularityScore: 85,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_2",
+    name:            "Budget Fitness Center",
+    type:            "gym",
+    location:        { lat: 9.0180, lng: 38.7520, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["affordable", "basic-equipment", "open-early"],
+    rating:          3.6,
+    popularityScore: 62,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_3",
+    name:            "Elite Performance Club",
+    type:            "gym",
+    location:        { lat: 9.0350, lng: 38.7610, city: "Addis Ababa" },
+    priceRange:      "high",
+    tags:            ["personal-training", "pool", "sauna", "premium"],
+    rating:          4.8,
+    popularityScore: 91,
+    isIndoor:        true,
+  },
+
+  // ── Yoga / Wellness ───────────────────────────────────────────────────────
+  {
+    id:              "place_4",
+    name:            "Sunrise Yoga Studio",
+    type:            "yoga",
+    location:        { lat: 9.0210, lng: 38.7490, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["morning-class", "beginner-friendly", "meditation"],
+    rating:          4.5,
+    popularityScore: 78,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_5",
+    name:            "Pilates & Wellness Hub",
+    type:            "yoga",
+    location:        { lat: 9.0300, lng: 38.7550, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["pilates", "stretching", "mindfulness", "group-class"],
+    rating:          4.3,
+    popularityScore: 72,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_6",
+    name:            "Tranquil Mind Retreat",
+    type:            "yoga",
+    location:        { lat: 9.0420, lng: 38.7400, city: "Addis Ababa" },
+    priceRange:      "high",
+    tags:            ["retreat", "sound-bath", "private-session", "holistic"],
+    rating:          4.9,
+    popularityScore: 65,
+    isIndoor:        true,
+  },
+
+  // ── Coffee / Cafes ────────────────────────────────────────────────────────
+  {
+    id:              "place_7",
+    name:            "The Coffee Bean",
+    type:            "coffee",
+    location:        { lat: 9.0260, lng: 38.7530, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["wifi", "quiet", "espresso", "study-friendly"],
+    rating:          4.1,
+    popularityScore: 80,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_8",
+    name:            "Gourmet Brunch Spot",
+    type:            "coffee",
+    location:        { lat: 9.0320, lng: 38.7480, city: "Addis Ababa" },
+    priceRange:      "high",
+    tags:            ["brunch", "specialty-coffee", "instagrammable", "cozy"],
+    rating:          4.6,
+    popularityScore: 88,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_9",
+    name:            "Cozy Coffee Corner",
+    type:            "coffee",
+    location:        { lat: 9.0150, lng: 38.7560, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["neighborhood", "books", "board-games", "friendly"],
+    rating:          4.0,
+    popularityScore: 70,
+    isIndoor:        true,
+  },
+
+  // ── Outdoor / Parks / Walks ───────────────────────────────────────────────
+  {
+    id:              "place_10",
+    name:            "City Park",
+    type:            "outdoor",
+    location:        { lat: 9.0200, lng: 38.7440, city: "Addis Ababa" },
+    priceRange:      "free",
+    tags:            ["family-friendly", "green-space", "jogging-path"],
+    rating:          4.0,
+    popularityScore: 75,
+    isIndoor:        false,
+  },
+  {
+    id:              "place_11",
+    name:            "Riverside Trail",
+    type:            "walk",
+    location:        { lat: 9.0270, lng: 38.7410, city: "Addis Ababa" },
+    priceRange:      "free",
+    tags:            ["scenic", "running", "cycling", "nature"],
+    rating:          4.4,
+    popularityScore: 80,
+    isIndoor:        false,
+  },
+  {
+    id:              "place_12",
+    name:            "Lakeside Picnic Ground",
+    type:            "outdoor",
+    location:        { lat: 9.0050, lng: 38.7380, city: "Addis Ababa" },
+    priceRange:      "free",
+    tags:            ["picnic", "lake-view", "weekend", "relaxing"],
+    rating:          4.2,
+    popularityScore: 68,
+    isIndoor:        false,
+  },
+
+  // ── Restaurants ───────────────────────────────────────────────────────────
+  {
+    id:              "place_13",
+    name:            "Habesha Kitchen",
+    type:            "restaurant",
+    location:        { lat: 9.0290, lng: 38.7500, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["traditional", "injera", "group-friendly", "lunch"],
+    rating:          4.5,
+    popularityScore: 87,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_14",
+    name:            "The Burger Lab",
+    type:            "restaurant",
+    location:        { lat: 9.0340, lng: 38.7580, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["casual", "burgers", "fast-service", "date-night"],
+    rating:          4.0,
+    popularityScore: 76,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_15",
+    name:            "Rooftop Dining & Views",
+    type:            "restaurant",
+    location:        { lat: 9.0380, lng: 38.7620, city: "Addis Ababa" },
+    priceRange:      "high",
+    tags:            ["rooftop", "sunset-view", "fine-dining", "wine"],
+    rating:          4.7,
+    popularityScore: 92,
+    isIndoor:        false,
+  },
+
+  // ── Social / Nightlife ────────────────────────────────────────────────────
+  {
+    id:              "place_16",
+    name:            "Rooftop Bar & Lounge",
+    type:            "social",
+    location:        { lat: 9.0370, lng: 38.7600, city: "Addis Ababa" },
+    priceRange:      "high",
+    tags:            ["nightlife", "cocktails", "city-view", "group-friendly"],
+    rating:          4.3,
+    popularityScore: 82,
+    isIndoor:        false,
+  },
+  {
+    id:              "place_17",
+    name:            "Night Owl Lounge",
+    type:            "social",
+    location:        { lat: 9.0230, lng: 38.7640, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["late-night", "music", "chill", "board-games"],
+    rating:          4.1,
+    popularityScore: 74,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_18",
+    name:            "The Social Hub",
+    type:            "social",
+    location:        { lat: 9.0410, lng: 38.7460, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["community", "events", "networking", "casual"],
+    rating:          4.0,
+    popularityScore: 69,
+    isIndoor:        true,
+  },
+
+  // ── Study / Libraries ─────────────────────────────────────────────────────
+  {
+    id:              "place_19",
+    name:            "Urban Library",
+    type:            "study",
+    location:        { lat: 9.0240, lng: 38.7510, city: "Addis Ababa" },
+    priceRange:      "free",
+    tags:            ["quiet", "books", "reading-nooks", "wifi"],
+    rating:          4.3,
+    popularityScore: 71,
+    isIndoor:        true,
+  },
+  {
+    id:              "place_20",
+    name:            "Neighbourhood Bookshop",
+    type:            "study",
+    location:        { lat: 9.0170, lng: 38.7470, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["independent", "reading", "cozy", "events"],
+    rating:          4.4,
+    popularityScore: 66,
+    isIndoor:        true,
+  },
+
+  // ── Parks ─────────────────────────────────────────────────────────────────
+  {
+    id:              "place_21",
+    name:            "Entoto Natural Park",
+    type:            "park",
+    location:        { lat: 9.0720, lng: 38.7530, city: "Addis Ababa" },
+    priceRange:      "free",
+    tags:            ["hiking", "forest", "fresh-air", "scenic"],
+    rating:          4.6,
+    popularityScore: 90,
+    isIndoor:        false,
+  },
+  {
+    id:              "place_22",
+    name:            "Unity Park",
+    type:            "park",
+    location:        { lat: 9.0330, lng: 38.7620, city: "Addis Ababa" },
+    priceRange:      "low",
+    tags:            ["family", "zoo", "heritage", "gardens"],
+    rating:          4.5,
+    popularityScore: 88,
+    isIndoor:        false,
+  },
+
+  // ── Extra diversity entries ───────────────────────────────────────────────
+  {
+    id:              "place_23",
+    name:            "Morning Brew Terrace",
+    type:            "coffee",
+    location:        { lat: 9.0190, lng: 38.7545, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["terrace", "breakfast", "organic", "healthy"],
+    rating:          4.2,
+    popularityScore: 73,
+    isIndoor:        false,
+  },
+  {
+    id:              "place_24",
+    name:            "Zenith CrossFit Box",
+    type:            "gym",
+    location:        { lat: 9.0285, lng: 38.7595, city: "Addis Ababa" },
+    priceRange:      "medium",
+    tags:            ["crossfit", "community", "hiit", "coached"],
+    rating:          4.4,
+    popularityScore: 79,
+    isIndoor:        true,
+  },
+];
