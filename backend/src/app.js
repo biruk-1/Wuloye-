@@ -10,6 +10,7 @@ import cors from "cors";
 
 import healthRouter from "./routes/health.js";
 import userRouter from "./routes/user.routes.js";
+import routineRouter from "./routes/routine.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
@@ -46,6 +47,9 @@ app.use("/api/health", healthRouter);
 // User routes — provides /api/profile and (future) /api/users/* endpoints.
 // Mounted at /api so the router controls the full path for each resource.
 app.use("/api", userRouter);
+
+// Routine routes — full CRUD under /api/routines
+app.use("/api/routines", routineRouter);
 
 // ─── Error Handlers (must be registered last) ────────────────────────────────
 
