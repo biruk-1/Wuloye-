@@ -77,3 +77,40 @@ export const getUserById = async (uid) => {
 
   return userSnap.data();
 };
+
+/**
+ * Updates mutable profile fields for an existing user.
+ *
+ * Only the keys present in `updates` are written — Firestore's update()
+ * performs a partial merge so untouched fields (uid, email, createdAt, etc.)
+ * are preserved.
+ *
+ * Allowed mutable fields:
+ *   name               {string}    — display name
+ *   interests          {string[]}  — list of activity/interest tags
+ *   budgetRange        {string}    — e.g. "low" | "medium" | "high"
+ *   locationPreference {string}    — e.g. "indoor" | "outdoor" | "any"
+ *
+ * @param {string} uid     — Firebase Auth UID (from verified token, never from body)
+ * @param {object} updates — validated fields to merge
+ *
+ * @returns {Promise<object>} The full updated user document
+ *
+ * @throws {Error} if the user document does not exist
+ */
+export const updateUserProfile = async (uid, updates) => {
+  const userRef  = db.collection(USERS_COLLECTION).doc(uid);
+  const userSnap = await userRef.get();
+
+  if (!userSnap.exists) {
+    const err = new Error("User profile not found");
+    err.statusCode = 404;
+    throw err;
+  }
+
+  // Merge only the supplied keys — system fields are never overwritten.
+  await userRef.update({ ...updates, updatedAt: new Date().toISOString() });
+
+  const updated = await userRef.get();
+  return updated.data();
+};

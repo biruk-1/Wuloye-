@@ -16,7 +16,7 @@
 import { Router } from "express";
 
 import { authenticate } from "../middleware/auth.middleware.js";
-import { getProfile } from "../controllers/user.controller.js";
+import { getProfile, updateProfile } from "../controllers/user.controller.js";
 
 const router = Router();
 
@@ -29,6 +29,14 @@ const router = Router();
  * Returns the caller's Firestore profile document, creating it on first login.
  */
 router.get("/profile", authenticate, getProfile);
+
+/**
+ * PUT /api/profile
+ *
+ * Protected — updates mutable fields on the caller's profile document.
+ * Updatable fields: name, interests, budgetRange, locationPreference.
+ */
+router.put("/profile", authenticate, updateProfile);
 
 // ─── Future user-management routes (Sprint 2+) ───────────────────────────────
 // router.get("/users",      authenticate, listUsers);

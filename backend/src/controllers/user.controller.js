@@ -6,7 +6,7 @@
  * user.service.js. Controllers only orchestrate and respond.
  */
 
-import { findOrCreateUser } from "../services/user.service.js";
+import { findOrCreateUser, updateUserProfile } from "../services/user.service.js";
 
 /**
  * GET /api/profile
@@ -35,6 +35,58 @@ export const getProfile = async (req, res, next) => {
     });
   } catch (error) {
     // Delegate to the centralised error handler in errorHandler.js
+    next(error);
+  }
+};
+
+/**
+ * PUT /api/profile
+ *
+ * Updates mutable fields of the authenticated user's profile.
+ * uid is always taken from the verified token — never from the request body.
+ *
+ * Updatable fields:
+ *   name               {string}
+ *   interests          {string[]}
+ *   budgetRange        {string}
+ *   locationPreference {string}
+ *
+ * Responses:
+ *   200 — { success: true, data: <updatedProfile>, message }
+ *   400 — no valid updatable fields were provided
+ *   404 — user profile document not found (forwarded to error handler)
+ *   500 — forwarded to the global error handler via next(error)
+ *
+ * @type {import("express").RequestHandler}
+ */
+
+/** Fields the client is allowed to update via PUT /api/profile. */
+const UPDATABLE_PROFILE_FIELDS = ["name", "interests", "budgetRange", "locationPreference"];
+
+export const updateProfile = async (req, res, next) => {
+  try {
+    // Extract only the allowed fields from the request body.
+    const updates = UPDATABLE_PROFILE_FIELDS.reduce((acc, field) => {
+      if (req.body[field] !== undefined) acc[field] = req.body[field];
+      return acc;
+    }, {});
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: `No updatable fields provided. Allowed fields: ${UPDATABLE_PROFILE_FIELDS.join(", ")}`,
+      });
+    }
+
+    const updated = await updateUserProfile(req.user.uid, updates);
+
+    return res.status(200).json({
+      success: true,
+      data: updated,
+      message: "Profile updated successfully",
+    });
+  } catch (error) {
     next(error);
   }
 };

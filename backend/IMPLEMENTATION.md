@@ -174,6 +174,24 @@ curl -H "Authorization: Bearer <token>" http://localhost:5000/api/profile
 
 ---
 
+## 🔥 Firestore index (interactions)
+
+The **GET /api/interactions** query filters by `userId` and orders by `createdAt` descending. Firestore requires a **composite index** for this.
+
+**One-time setup:**
+
+1. **Option A (quick):** When the API returns an error, it includes a link. Open that link in your browser — it opens the Firebase Console with the index pre-filled. Click **Create index** and wait a few minutes for it to build.
+
+2. **Option B (CLI):** If you use the Firebase CLI from this backend folder, run:
+   ```bash
+   firebase deploy --only firestore:indexes
+   ```
+   (Requires `firebase.json` that references `firestore.indexes.json`.)
+
+Index definition is in **`firestore.indexes.json`** at the repo root.
+
+---
+
 ## 📝 Next Steps (Future Sprints)
 
 - [ ] User profile updates (PATCH /api/profile)

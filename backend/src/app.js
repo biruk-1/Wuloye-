@@ -11,6 +11,8 @@ import cors from "cors";
 import healthRouter from "./routes/health.js";
 import userRouter from "./routes/user.routes.js";
 import routineRouter from "./routes/routine.routes.js";
+import interactionRouter from "./routes/interaction.routes.js";
+import recommendationRouter from "./routes/recommendation.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 
 const app = express();
@@ -50,6 +52,12 @@ app.use("/api", userRouter);
 
 // Routine routes — full CRUD under /api/routines
 app.use("/api/routines", routineRouter);
+
+// Interaction routes — data collection for AI recommendations under /api/interactions
+app.use("/api/interactions", interactionRouter);
+
+// Recommendation routes — personalised ranked place list under /api/recommendations
+app.use("/api/recommendations", recommendationRouter);
 
 // ─── Error Handlers (must be registered last) ────────────────────────────────
 
