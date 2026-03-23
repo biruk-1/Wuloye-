@@ -1,61 +1,62 @@
 /**
- * recommendation.service.js — Personalized recommendation engine (v4).
+ * recommendation.service.js — Personalized recommendation engine (v5).
  *
- * v4 change: fully context-aware scoring.
- *   - Request-time context is built once via buildContext() in utils/context.js
- *     and passed through the entire scoring pipeline.
- *   - Two new scoring rules (weekday/weekend day-part boost) augment the
- *     existing eight rules.
- *   - The context object is returned from getRecommendations() so the
- *     controller can expose it in debug mode.
+ * v5 change: adaptive intelligence layer on top of v4.
+ *   - Score normalization   raw → 0-100 bounded score (rawScore preserved)
+ *   - Recency weighting     recent interactions count more (weight = 1 / (1 + ageInDays))
+ *   - Freshness boost       never-seen places get +3 to encourage discovery
+ *   - Exploration boost     low-interaction places get a small random nudge (0–2)
+ *   - Diversity injection   interleaved top-N: no two consecutive results share a type
  *
- * All 8 original scoring rules are unchanged. The two new rules are purely
- * additive — existing scores are never modified.
+ * All v4 scoring rules are untouched. The five new mechanics are purely additive
+ * or post-processing; no existing field is removed or renamed.
  *
  * Scoring rules (cumulative per place):
- *   — Original rules (unchanged) ——————————————————————————————————————————
+ *   — Original rules (v4, unchanged) ————————————————————————————————————————
  *   +3  routine activityType matches place.type (per routine)
  *   +2  budget match (profile or any routine; "free" places always match)
  *   +2  location match (profile or any routine; "any" always matches)
- *   +Σ  sum of raw interaction scores for this exact placeId
+ *   +Σ  sum of recency-weighted interaction scores for this exact placeId  ← v5: recency
  *   +5  user has "save" on any place of the same type
  *   -3  user has "dismiss" on any place of the same type
  *   +4  type affinity is positive (Σ type scores > 0)
  *   -4  type affinity is negative (Σ type scores < 0)
  *   +2  place type matches a routine whose timeOfDay fits current hour (legacy)
- *   — New context-aware rules ——————————————————————————————————————————————
+ *   — Context-aware rules (v4, unchanged) ————————————————————————————————————
  *   +3  place type matches the current time-of-day behaviour pattern
- *         morning   → coffee, gym, yoga
- *         afternoon → coffee, restaurant
- *         evening   → social, restaurant
- *         night     → social
- *   +2  weekend boost: social / outdoor types (+2 on Sat/Sun)
- *   +1  weekday boost: gym / coffee types (+1 on Mon–Fri)
+ *   +2  weekend boost: social / outdoor types
+ *   +1  weekday boost: gym / coffee types
+ *   — Adaptive rules (v5, NEW) ————————————————————————————————————————————
+ *   +3  freshness boost: user has never interacted with this place
+ *   0–2 exploration boost: low-interaction place gets small random nudge
  *
- * Post-scoring filters:
- *   - Dismissed places removed entirely.
- *   - Saved places pinned into top-5.
- *   - Max 3 results per type in the final list.
+ * Post-scoring pipeline:
+ *   1. Dismiss filter        — remove hard-dismissed places
+ *   2. Normalize             — clamp rawScore to 0–100 (preserved as rawScore)
+ *   3. Sort by score desc
+ *   4. Diversity injection   — interleave so no two consecutive results share type
+ *   5. Pin saved             — saved places anchored into top-5
  *
  * Data sources:
  *   Collection "places"        — via place.service.getAllPlaces() (cached)
  *   Collection "users"         — profile (budgetRange, locationPreference)
  *   Collection "routines"      — activityType, timeOfDay, locationPreference, budgetRange
- *   Collection "interactions"  — placeId, actionType, score
+ *   Collection "interactions"  — placeId, actionType, score, createdAt
  */
 
-import { db }         from "../config/firebase.js";
-import { getUserById } from "./user.service.js";
-import { getAllPlaces } from "./place.service.js";
+import { db }          from "../config/firebase.js";
+import { getUserById }  from "./user.service.js";
+import { getAllPlaces }  from "./place.service.js";
 import { buildContext } from "../utils/context.js";
+import { SEED_PLACES }  from "../data/places.seed.js";
 
 const ROUTINES_COLLECTION     = "routines";
 const INTERACTIONS_COLLECTION = "interactions";
 
 // ─── Scoring weights ──────────────────────────────────────────────────────────
-// Centralised so all weights can be tuned in one place.
 
 const WEIGHTS = Object.freeze({
+  // v4 rules
   routineMatchPerRoutine: 3,
   budgetMatch:            2,
   locationMatch:          2,
@@ -63,15 +64,20 @@ const WEIGHTS = Object.freeze({
   typeDismissSignal:      -3,
   affinityPositive:       4,
   affinityNegative:       -4,
-  routineTimeOfDayMatch:  2,  // legacy: routine matches current time
-  contextTimeOfDay:       3,  // new: place type fits current time-of-day band
-  weekendBoost:           2,  // new: social/outdoor on weekends
-  weekdayBoost:           1,  // new: gym/coffee on weekdays
+  routineTimeOfDayMatch:  2,
+  contextTimeOfDay:       3,
+  weekendBoost:           2,
+  weekdayBoost:           1,
+  // v5 rules
+  freshnessBoost:         3,
+  explorationMax:         2,   // Math.random() * this is added for low-interaction places
 });
+
+/** A place is considered "low interaction" if it has fewer than this many events. */
+const LOW_INTERACTION_THRESHOLD = 2;
 
 // ─── Context-aware type maps ──────────────────────────────────────────────────
 
-/** Place types that are typically preferred in each time-of-day band. */
 const TIME_OF_DAY_TYPE_MAP = Object.freeze({
   morning:   new Set(["coffee", "gym", "yoga"]),
   afternoon: new Set(["coffee", "restaurant"]),
@@ -79,19 +85,11 @@ const TIME_OF_DAY_TYPE_MAP = Object.freeze({
   night:     new Set(["social"]),
 });
 
-/** Types boosted on weekends. */
 const WEEKEND_BOOST_TYPES = new Set(["social", "outdoor"]);
-
-/** Types boosted on weekdays. */
 const WEEKDAY_BOOST_TYPES = new Set(["gym", "coffee"]);
 
 // ─── Field-mapping adapter ────────────────────────────────────────────────────
 
-/**
- * Resolves the indoor/outdoor string from the boolean isIndoor field.
- * @param {object} place
- * @returns {"indoor"|"outdoor"}
- */
 const resolveLocationType = (place) => (place.isIndoor ? "indoor" : "outdoor");
 
 // ─── Data Fetchers ────────────────────────────────────────────────────────────
@@ -110,24 +108,53 @@ const fetchInteractions = async (userId) => {
   return snap.docs.map((d) => d.data());
 };
 
+// ─── Lookup Map ───────────────────────────────────────────────────────────────
+
+/**
+ * Builds a map keyed by every known placeId (Firestore doc id + seed id aliases).
+ * This ensures interactions stored with "place_1" style ids resolve to catalogue rows.
+ */
+const buildPlaceLookupMap = (places) => {
+  const map = new Map();
+  for (const p of places) {
+    map.set(String(p.id), p);
+  }
+  for (const seed of SEED_PLACES) {
+    if (!seed.id) continue;
+    const match = places.find((pl) => pl.name === seed.name && pl.type === seed.type);
+    if (match) map.set(seed.id, match);
+  }
+  return map;
+};
+
+const resolvePlace = (placeLookup, placeId) => {
+  if (placeId == null || placeId === "") return undefined;
+  return placeLookup.get(String(placeId));
+};
+
 // ─── Pre-computation Helpers ──────────────────────────────────────────────────
 
-const buildTypeAffinityMap = (interactions, placeById) => {
+const buildTypeAffinityMap = (interactions, placeLookup) => {
   const affinityMap = new Map();
   for (const interaction of interactions) {
-    const place = placeById.get(interaction.placeId);
+    const place = resolvePlace(placeLookup, interaction.placeId);
     if (!place) continue;
     affinityMap.set(place.type, (affinityMap.get(place.type) ?? 0) + (interaction.score ?? 0));
   }
   return affinityMap;
 };
 
-const buildStrongSignalSets = (interactions) => {
+/**
+ * Strong signals: resolve interaction place ids so save/dismiss sets hold live catalogue ids.
+ */
+const buildStrongSignalSets = (interactions, placeLookup) => {
   const savedIds     = new Set();
   const dismissedIds = new Set();
   for (const interaction of interactions) {
-    if (interaction.actionType === "save")    savedIds.add(interaction.placeId);
-    if (interaction.actionType === "dismiss") dismissedIds.add(interaction.placeId);
+    const place = resolvePlace(placeLookup, interaction.placeId);
+    if (!place) continue;
+    if (interaction.actionType === "save")    savedIds.add(place.id);
+    if (interaction.actionType === "dismiss") dismissedIds.add(place.id);
   }
   return { savedIds, dismissedIds };
 };
@@ -141,20 +168,130 @@ const deriveTopInterestType = (affinityMap) => {
   return topType;
 };
 
+/**
+ * Computes per-place interaction statistics for the recency and freshness rules.
+ *
+ * Returns a Map<cataloguePlaceId, { count: number, recencyWeightedScore: number }>
+ * where recencyWeightedScore = Σ (interaction.score * 1/(1 + ageInDays)).
+ *
+ * @param {object[]} interactions
+ * @param {Map}      placeLookup
+ * @param {Date}     now — injectable for testing
+ */
+const buildInteractionIndex = (interactions, placeLookup, now = new Date()) => {
+  const index = new Map(); // placeId → { count, recencyWeightedScore }
+
+  for (const interaction of interactions) {
+    const place = resolvePlace(placeLookup, interaction.placeId);
+    if (!place) continue;
+
+    const entry = index.get(place.id) ?? { count: 0, recencyWeightedScore: 0 };
+
+    const createdAt  = interaction.createdAt ? new Date(interaction.createdAt) : now;
+    const ageInDays  = Math.max(0, (now - createdAt) / (1000 * 60 * 60 * 24));
+    const weight     = 1 / (1 + ageInDays);
+
+    entry.count               += 1;
+    entry.recencyWeightedScore += (interaction.score ?? 0) * weight;
+
+    index.set(place.id, entry);
+  }
+
+  return index;
+};
+
+// ─── Score Normalization ──────────────────────────────────────────────────────
+
+/**
+ * Clamps a raw score to [0, 100].
+ * Negative totals become 0; absurdly high totals are capped at 100.
+ */
+const normalizeScore = (raw) => Math.min(100, Math.max(0, raw));
+
+// ─── Diversity Injection ──────────────────────────────────────────────────────
+
+/**
+ * Interleaves a score-sorted array so that no two consecutive entries share
+ * the same place type. Preserves relative ordering within each type.
+ *
+ * Algorithm:
+ *   1. Group by type (preserving per-type rank)
+ *   2. Round-robin pick from type buckets, skipping the last-used type
+ *   3. When no non-repeating type is available, allow the repeat to avoid
+ *      discarding results
+ *
+ * @param {object[]} sorted    — sorted descending by score, diversity-controlled (max N per type)
+ * @param {number}   limit     — max output size
+ * @returns {object[]}
+ */
+const injectDiversity = (sorted, limit) => {
+  // Group into per-type buckets (order within bucket preserved).
+  const buckets = new Map();
+  for (const place of sorted) {
+    if (!buckets.has(place.type)) buckets.set(place.type, []);
+    buckets.get(place.type).push(place);
+  }
+
+  const result = [];
+  let lastType = null;
+
+  while (result.length < limit) {
+    // Prefer types that are not the same as the previous result.
+    let chosen = null;
+
+    // Pass 1: find the highest-score candidate from a *different* type.
+    let bestScore    = -Infinity;
+    let bestType     = null;
+    for (const [type, items] of buckets.entries()) {
+      if (items.length === 0)     continue;
+      if (type === lastType)      continue;
+      if (items[0].score > bestScore) {
+        bestScore = items[0].score;
+        bestType  = type;
+      }
+    }
+
+    if (bestType) {
+      chosen = bestType;
+    } else {
+      // Pass 2: all remaining candidates are the same type — allow repeat.
+      for (const [type, items] of buckets.entries()) {
+        if (items.length > 0) { chosen = type; break; }
+      }
+    }
+
+    if (!chosen) break; // pool exhausted
+
+    const item = buckets.get(chosen).shift();
+    if (buckets.get(chosen).length === 0) buckets.delete(chosen);
+
+    result.push(item);
+    lastType = chosen;
+  }
+
+  return result;
+};
+
 // ─── Scoring Engine ───────────────────────────────────────────────────────────
 
 /**
  * Scores a single place against all user and context signals.
  *
- * @param {object}             place        — Firestore place document
- * @param {object|null}        profile      — user's Firestore profile
- * @param {object[]}           routines     — user's routines (may be empty)
- * @param {object[]}           interactions — user's interactions (may be empty)
- * @param {Map<string,number>} affinityMap  — pre-built type-affinity map
- * @param {Map<string,object>} placeById    — placeId → place document
- * @param {object}             context      — built by buildContext() in utils/context.js
+ * v5 additions:
+ *   - interactionScore is now recency-weighted (not a raw sum)
+ *   - freshnessBoost  (+3 for places with 0 prior interactions)
+ *   - explorationBoost (0–2 random, only for low-interaction places)
  *
- * @returns {{ total: number, breakdown: object }}
+ * @param {object}             place             — Firestore place document
+ * @param {object|null}        profile           — user's Firestore profile
+ * @param {object[]}           routines          — user's routines
+ * @param {object[]}           interactions      — user's interactions (raw, still used for type rules)
+ * @param {Map<string,number>} affinityMap       — pre-built type-affinity map
+ * @param {Map<string,object>} placeLookup       — placeId (incl. seed aliases) → place document
+ * @param {object}             context           — from buildContext()
+ * @param {Map<string,object>} interactionIndex  — per-place { count, recencyWeightedScore }
+ *
+ * @returns {{ total: number, rawScore: number, breakdown: object }}
  */
 export const scorePlaceForUser = (
   place,
@@ -162,21 +299,27 @@ export const scorePlaceForUser = (
   routines,
   interactions,
   affinityMap,
-  placeById,
-  context
+  placeLookup,
+  context,
+  interactionIndex
 ) => {
   const breakdown = {
+    // ── v4 fields ─────────────────────────────────────────
     routineMatch:      0,
     budgetMatch:       0,
     locationMatch:     0,
-    interactionScore:  0,
+    interactionScore:  0,   // now recency-weighted
     typeSaveSignal:    0,
     typeDismissSignal: 0,
     affinityBoost:     0,
-    timeOfDayMatch:    0,  // legacy: routine-based time match
-    contextTimeOfDay:  0,  // new: time-of-day band match
-    weekendBoost:      0,  // new
-    weekdayBoost:      0,  // new
+    timeOfDayMatch:    0,
+    contextTimeOfDay:  0,
+    weekendBoost:      0,
+    weekdayBoost:      0,
+    // ── v5 fields ─────────────────────────────────────────
+    freshnessBoost:    0,
+    explorationBoost:  0,
+    recencyWeight:     1,   // stored for debug transparency (avg effective weight)
   };
 
   const locationType = resolveLocationType(place);
@@ -205,16 +348,18 @@ export const scorePlaceForUser = (
     breakdown.locationMatch = WEIGHTS.locationMatch;
   }
 
-  // ── Rule 4: Direct interaction score (Σ raw scores for this placeId) ─────────
-  for (const interaction of interactions) {
-    if (interaction.placeId === place.id) {
-      breakdown.interactionScore += interaction.score ?? 0;
-    }
+  // ── Rule 4 (v5): Recency-weighted interaction score ──────────────────────────
+  // interactionScore = Σ ( score_i * 1/(1 + ageInDays_i) )
+  const placeStats = interactionIndex.get(place.id);
+  if (placeStats && placeStats.count > 0) {
+    breakdown.interactionScore = placeStats.recencyWeightedScore;
+    // Expose the effective average weight for debug transparency.
+    breakdown.recencyWeight = +(placeStats.recencyWeightedScore / placeStats.count).toFixed(3);
   }
 
   // ── Rule 5a/5b: Type-level save (+5) / dismiss (-3) signals ─────────────────
   for (const interaction of interactions) {
-    const interactionPlace = placeById.get(interaction.placeId);
+    const interactionPlace = resolvePlace(placeLookup, interaction.placeId);
     if (!interactionPlace || interactionPlace.type !== place.type) continue;
     if (interaction.actionType === "save"    && breakdown.typeSaveSignal    === 0) breakdown.typeSaveSignal    = WEIGHTS.typeSaveSignal;
     if (interaction.actionType === "dismiss" && breakdown.typeDismissSignal === 0) breakdown.typeDismissSignal = WEIGHTS.typeDismissSignal;
@@ -226,7 +371,6 @@ export const scorePlaceForUser = (
   if (typeAffinity < 0) breakdown.affinityBoost = WEIGHTS.affinityNegative;
 
   // ── Rule 7 (legacy): Routine time-of-day match (+2) ─────────────────────────
-  // Kept for backward-compatibility with existing test assertions.
   for (const routine of routines) {
     if (routine.activityType === place.type && routine.timeOfDay === timeOfDay) {
       breakdown.timeOfDayMatch = WEIGHTS.routineTimeOfDayMatch;
@@ -234,25 +378,35 @@ export const scorePlaceForUser = (
     }
   }
 
-  // ── Rule 8 (NEW): Context time-of-day band match (+3) ───────────────────────
-  // Boosts place types that are behaviourally appropriate right now,
-  // regardless of whether the user has a matching routine.
+  // ── Rule 8: Context time-of-day band match (+3) ───────────────────────────────
   const typesForNow = TIME_OF_DAY_TYPE_MAP[timeOfDay] ?? new Set();
   if (typesForNow.has(place.type)) {
     breakdown.contextTimeOfDay = WEIGHTS.contextTimeOfDay;
   }
 
-  // ── Rule 9 (NEW): Weekend boost (+2 for social / outdoor) ───────────────────
+  // ── Rule 9: Weekend boost (+2 for social / outdoor) ──────────────────────────
   if (isWeekend && WEEKEND_BOOST_TYPES.has(place.type)) {
     breakdown.weekendBoost = WEIGHTS.weekendBoost;
   }
 
-  // ── Rule 10 (NEW): Weekday boost (+1 for gym / coffee) ───────────────────────
+  // ── Rule 10: Weekday boost (+1 for gym / coffee) ──────────────────────────────
   if (!isWeekend && WEEKDAY_BOOST_TYPES.has(place.type)) {
     breakdown.weekdayBoost = WEIGHTS.weekdayBoost;
   }
 
-  const total =
+  // ── Rule 11 (v5 NEW): Freshness boost (+3 for never-seen places) ─────────────
+  const interactionCount = placeStats?.count ?? 0;
+  if (interactionCount === 0) {
+    breakdown.freshnessBoost = WEIGHTS.freshnessBoost;
+  }
+
+  // ── Rule 12 (v5 NEW): Exploration boost (0–2 random for low-interaction) ─────
+  // Injects controlled randomness so the same places don't always surface.
+  if (interactionCount < LOW_INTERACTION_THRESHOLD) {
+    breakdown.explorationBoost = +(Math.random() * WEIGHTS.explorationMax).toFixed(3);
+  }
+
+  const rawScore =
     breakdown.routineMatch      +
     breakdown.budgetMatch       +
     breakdown.locationMatch     +
@@ -263,30 +417,17 @@ export const scorePlaceForUser = (
     breakdown.timeOfDayMatch    +
     breakdown.contextTimeOfDay  +
     breakdown.weekendBoost      +
-    breakdown.weekdayBoost;
+    breakdown.weekdayBoost      +
+    breakdown.freshnessBoost    +
+    breakdown.explorationBoost;
 
-  return { total, breakdown };
-};
-
-// ─── Diversity Control ────────────────────────────────────────────────────────
-
-const applyDiversityControl = (sorted, maxPerType = 3, limit = 10) => {
-  const typeCount = new Map();
-  const result    = [];
-  for (const place of sorted) {
-    if (result.length >= limit) break;
-    const count = typeCount.get(place.type) ?? 0;
-    if (count >= maxPerType) continue;
-    typeCount.set(place.type, count + 1);
-    result.push(place);
-  }
-  return result;
+  return { rawScore, breakdown };
 };
 
 // ─── Main Recommendation Function ────────────────────────────────────────────
 
 /**
- * Generates a personalised, context-aware, ranked, and diverse list of places.
+ * Generates a personalised, context-aware, diverse, and adaptive list of places.
  *
  * @param {string}  userId        — Firebase UID from the verified token
  * @param {boolean} [debug=false] — attach scoreBreakdown to each result
@@ -308,12 +449,10 @@ const applyDiversityControl = (sorted, maxPerType = 3, limit = 10) => {
  * @throws {Error} statusCode 404 when no user profile exists
  */
 export const getRecommendations = async (userId, debug = false, limit = 10) => {
-  // Build request-time context once — all scoring rules read from this object.
   const context = buildContext();
 
   console.log(`[recommendations] uid=${userId} time=${context.timeOfDay} isWeekend=${context.isWeekend}`);
 
-  // Fetch all data sources concurrently.
   const [profile, routines, interactions, places] = await Promise.all([
     getUserById(userId),
     fetchRoutines(userId),
@@ -327,25 +466,28 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
     throw err;
   }
 
-  // Build fast lookups.
-  const placeById = new Map(places.map((p) => [p.id, p]));
+  // Build lookup structures.
+  const placeLookup        = buildPlaceLookupMap(places);
+  const affinityMap        = buildTypeAffinityMap(interactions, placeLookup);
+  const { savedIds, dismissedIds } = buildStrongSignalSets(interactions, placeLookup);
+  const topInterestType    = deriveTopInterestType(affinityMap);
+  const interactionIndex   = buildInteractionIndex(interactions, placeLookup);
 
-  // Pre-compute shared signals.
-  const affinityMap              = buildTypeAffinityMap(interactions, placeById);
-  const { savedIds, dismissedIds } = buildStrongSignalSets(interactions);
-  const topInterestType          = deriveTopInterestType(affinityMap);
-
-  // Score every place in the catalogue.
+  // ── Phase 1: Score every catalogue place ──────────────────────────────────────
   const scored = places.map((place) => {
-    const { total, breakdown } = scorePlaceForUser(
-      place, profile, routines, interactions, affinityMap, placeById, context
+    const { rawScore, breakdown } = scorePlaceForUser(
+      place, profile, routines, interactions,
+      affinityMap, placeLookup, context, interactionIndex
     );
 
+    const normalizedScore = normalizeScore(rawScore);
+
     const entry = {
-      id:    place.id,
-      name:  place.name,
-      type:  place.type,
-      score: total,
+      id:       place.id,
+      name:     place.name,
+      type:     place.type,
+      score:    normalizedScore,   // 0–100 normalized
+      rawScore: +rawScore.toFixed(3),
     };
 
     if (debug) entry.scoreBreakdown = breakdown;
@@ -353,13 +495,30 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
     return entry;
   });
 
-  // Post-processing: dismiss → sort → diversity → pin saved.
+  // ── Phase 2: Filter out dismissed places ─────────────────────────────────────
   const withoutDismissed = scored.filter((p) => !dismissedIds.has(p.id));
+
+  // ── Phase 3: Sort descending by normalized score ──────────────────────────────
   withoutDismissed.sort((a, b) => b.score - a.score);
-  const diversified    = applyDiversityControl(withoutDismissed, 3, limit * 2);
-  const saved          = diversified.filter((p) =>  savedIds.has(p.id));
-  const others         = diversified.filter((p) => !savedIds.has(p.id));
-  const pinned         = saved.slice(0, 5);
+
+  // ── Phase 4: Diversity — max 3 per type pool, then interleave ────────────────
+  // Build a pool with at most 3 of each type (keeps order within type).
+  const typeCount  = new Map();
+  const poolCapped = [];
+  for (const p of withoutDismissed) {
+    const n = typeCount.get(p.type) ?? 0;
+    if (n >= 3) continue;
+    typeCount.set(p.type, n + 1);
+    poolCapped.push(p);
+  }
+
+  // Interleave so no two consecutive results share a type.
+  const interleaved = injectDiversity(poolCapped, limit * 2);
+
+  // ── Phase 5: Pin saved places into top-5 ─────────────────────────────────────
+  const saved   = interleaved.filter((p) =>  savedIds.has(p.id));
+  const others  = interleaved.filter((p) => !savedIds.has(p.id));
+  const pinned  = saved.slice(0, 5);
   const recommendations = [...pinned, ...others.slice(0, limit - pinned.length)];
 
   const meta = {
@@ -370,7 +529,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
     placesInCatalogue: places.length,
   };
   if (debug) {
-    meta.context = context;  // explicit so clients always receive it when debug=true
+    meta.context = context;
   }
 
   return { recommendations, context, meta };

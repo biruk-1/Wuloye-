@@ -315,19 +315,23 @@ if ($null -eq $topResult.scoreBreakdown) {
 
     Write-Host ""
     Write-Host "  Score breakdown for #1: $($topResult.name) (type: $($topResult.type))" -ForegroundColor Cyan
-    Write-Host ("    routineMatch      : {0,4}" -f $bd.routineMatch)       -ForegroundColor White
-    Write-Host ("    budgetMatch       : {0,4}" -f $bd.budgetMatch)        -ForegroundColor White
-    Write-Host ("    locationMatch     : {0,4}" -f $bd.locationMatch)      -ForegroundColor White
-    Write-Host ("    interactionScore  : {0,4}" -f $bd.interactionScore)   -ForegroundColor White
-    Write-Host ("    typeSaveSignal    : {0,4}" -f $bd.typeSaveSignal)     -ForegroundColor White
-    Write-Host ("    typeDismissSignal : {0,4}" -f $bd.typeDismissSignal)  -ForegroundColor White
-    Write-Host ("    affinityBoost     : {0,4}" -f $bd.affinityBoost)      -ForegroundColor White
-    Write-Host ("    timeOfDayMatch    : {0,4}" -f $bd.timeOfDayMatch)     -ForegroundColor White
-    Write-Host ("    contextTimeOfDay  : {0,4}" -f $bd.contextTimeOfDay)   -ForegroundColor White
-    Write-Host ("    weekendBoost      : {0,4}" -f $bd.weekendBoost)       -ForegroundColor White
-    Write-Host ("    weekdayBoost      : {0,4}" -f $bd.weekdayBoost)       -ForegroundColor White
+    Write-Host ("    routineMatch      : {0,6}" -f $bd.routineMatch)       -ForegroundColor White
+    Write-Host ("    budgetMatch       : {0,6}" -f $bd.budgetMatch)        -ForegroundColor White
+    Write-Host ("    locationMatch     : {0,6}" -f $bd.locationMatch)      -ForegroundColor White
+    Write-Host ("    interactionScore  : {0,6}" -f $bd.interactionScore)   -ForegroundColor White
+    Write-Host ("    recencyWeight     : {0,6}" -f $bd.recencyWeight)      -ForegroundColor White
+    Write-Host ("    typeSaveSignal    : {0,6}" -f $bd.typeSaveSignal)     -ForegroundColor White
+    Write-Host ("    typeDismissSignal : {0,6}" -f $bd.typeDismissSignal)  -ForegroundColor White
+    Write-Host ("    affinityBoost     : {0,6}" -f $bd.affinityBoost)      -ForegroundColor White
+    Write-Host ("    timeOfDayMatch    : {0,6}" -f $bd.timeOfDayMatch)     -ForegroundColor White
+    Write-Host ("    contextTimeOfDay  : {0,6}" -f $bd.contextTimeOfDay)   -ForegroundColor White
+    Write-Host ("    weekendBoost      : {0,6}" -f $bd.weekendBoost)       -ForegroundColor White
+    Write-Host ("    weekdayBoost      : {0,6}" -f $bd.weekdayBoost)       -ForegroundColor White
+    Write-Host ("    freshnessBoost    : {0,6}" -f $bd.freshnessBoost)     -ForegroundColor Cyan
+    Write-Host ("    explorationBoost  : {0,6}" -f $bd.explorationBoost)   -ForegroundColor Cyan
     Write-Host ("    -------------------------")                             -ForegroundColor DarkGray
-    Write-Host ("    TOTAL             : {0,4}" -f $topResult.score)       -ForegroundColor Green
+    Write-Host ("    rawScore          : {0,6}" -f $topResult.rawScore)    -ForegroundColor Yellow
+    Write-Host ("    TOTAL (norm.)     : {0,6}" -f $topResult.score)       -ForegroundColor Green
 
     # 5-A: routineMatch must be > 0 for the top result
     if ($bd.routineMatch -gt 0) {
@@ -352,6 +356,46 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Pass "Interaction learning present in $($anyLearning.Count) result(s) (interactionScore or affinityBoost != 0)"
     } else {
         Print-Fail "No result has interactionScore or affinityBoost non-zero -- interaction learning missing"
+    }
+
+    # 5-D: v5 fields — freshnessBoost and explorationBoost must exist in breakdown
+    if ($null -ne $bd.PSObject.Properties["freshnessBoost"]) {
+        Print-Pass "scoreBreakdown.freshnessBoost field present ($($bd.freshnessBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.freshnessBoost field missing -- v5 upgrade not applied"
+    }
+
+    if ($null -ne $bd.PSObject.Properties["explorationBoost"]) {
+        Print-Pass "scoreBreakdown.explorationBoost field present ($($bd.explorationBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.explorationBoost field missing -- v5 upgrade not applied"
+    }
+
+    # 5-E: rawScore must be present and numeric
+    if ($null -ne $topResult.rawScore) {
+        Print-Pass "rawScore present on top result ($($topResult.rawScore))"
+    } else {
+        Print-Fail "rawScore missing -- score normalization not applied"
+    }
+
+    # 5-F: normalized score must be in [0, 100]
+    $ns = [double]$topResult.score
+    if ($ns -ge 0 -and $ns -le 100) {
+        Print-Pass "score (normalized) in valid range 0-100 ($ns)"
+    } else {
+        Print-Fail "score out of normalized range: $ns"
+    }
+
+    # 5-G: consecutive types in top 5 must not all be the same (diversity injection check)
+    $types = @($recs | Select-Object -First 5 | ForEach-Object { $_.type })
+    $consecutiveDup = $false
+    for ($i = 1; $i -lt $types.Count; $i++) {
+        if ($types[$i] -eq $types[$i-1]) { $consecutiveDup = $true; break }
+    }
+    if (-not $consecutiveDup) {
+        Print-Pass "Diversity injection: no two consecutive places share a type in top 5"
+    } else {
+        Print-Warn "Two consecutive places share the same type in top 5 -- diversity may be limited by catalogue size"
     }
 }
 

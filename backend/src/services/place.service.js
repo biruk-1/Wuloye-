@@ -89,7 +89,8 @@ export const getAllPlaces = async () => {
 
   console.log("[places] Cache miss — loading from Firestore");
   const snap = await db.collection(PLACES_COLLECTION).get();
-  const places = snap.docs.map((d) => d.data());
+  // Use snapshot document ID so place.id always matches Firestore doc id (e.g. place_1).
+  const places = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
 
   setCache(places);
   return places;
