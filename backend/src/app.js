@@ -15,6 +15,7 @@ import interactionRouter from "./routes/interaction.routes.js";
 import recommendationRouter from "./routes/recommendation.routes.js";
 import devRouter from "./routes/dev.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
+import { initModelCache } from "./services/ai/modelService.js";
 
 const app = express();
 
@@ -70,5 +71,13 @@ if (process.env.NODE_ENV !== "production") {
 
 app.use(notFoundHandler);
 app.use(errorHandler);
+
+// ─── AI model warm-up ────────────────────────────────────────────────────────
+// Load the trained model from Firestore (or file backup) into the in-memory
+// cache so the first recommendation request is not delayed by a cold read.
+// Non-fatal: failure only means the model stays in its untrained default state.
+initModelCache().catch((err) =>
+  console.warn(`[app] AI model init failed: ${err.message} — will use rule-based scoring only`)
+);
 
 export default app;

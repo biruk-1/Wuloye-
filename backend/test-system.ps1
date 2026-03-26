@@ -5,16 +5,26 @@
 #
 # Verifies that the entire data pipeline works end-to-end:
 #
-#   Data -> Behavior -> Learning -> Decision
+#   Data -> Behavior -> Learning -> Model -> Decision
 #
 #   STEP 0  Auth          -- get Firebase ID token
 #   STEP 1  Profile setup -- PUT /api/profile (interests, budget, location)
 #   STEP 2  Routines      -- create 2 routines, verify IDs
 #   STEP 3  Interactions  -- log 7 realistic behaviors, verify scores
 #   STEP 4  Recommendations -- GET ?debug=true, verify personalization
-#   STEP 5  Score breakdown  -- verify per-rule signals in top result
-#   STEP 6  Meta validation  -- profileFound, routineCount, interactionCount,
-#                               topInterestType
+#   STEP 5  Score breakdown  -- verify per-rule signals + Phase 7 (intent, recent, echo)
+#                               + Phase 8 (session, sequence, diversity penalty, cold-start)
+#                               + Phase 9 (embeddingScore, longTermAffinityBoost)
+#                               + Phase 10 (exploitationBoost, explorationBoost enhanced,
+#                                           repeatPenalty, diversityBoost)
+#                               + Phase 11/12 (modelScore from AI linear model)
+#   STEP 6  Meta validation  -- profileFound, routines, interactions, topInterestType,
+#                               context (timeOfDay, isLateNight), detectedIntent,
+#                               session (dominantSessionType, sessionIntent, recentActionCount),
+#                               longTerm (topEmbeddingType, embeddingStrength),
+#                               exploration (explorationWeight, exploitationWeight),
+#                               ai (modelActive, modelVersion, versionNumber, lastTrainedAt, sampleCount)
+#                               learning (recencyWeightActive, behaviorShiftDetected) [Phase 13]
 #   STEP 7  Cleanup          -- delete the 2 test routines
 #
 # Exit code: 0 = PASSED, 1 = FAILED
@@ -322,13 +332,34 @@ if ($null -eq $topResult.scoreBreakdown) {
     Write-Host ("    recencyWeight     : {0,6}" -f $bd.recencyWeight)      -ForegroundColor White
     Write-Host ("    typeSaveSignal    : {0,6}" -f $bd.typeSaveSignal)     -ForegroundColor White
     Write-Host ("    typeDismissSignal : {0,6}" -f $bd.typeDismissSignal)  -ForegroundColor White
-    Write-Host ("    affinityBoost     : {0,6}" -f $bd.affinityBoost)      -ForegroundColor White
+    Write-Host ("    affinityBoost     : {0,6}" -f $bd.affinityBoost)      -ForegroundColor DarkGray
+    Write-Host ("    typeAffinityScore : {0,6}" -f $bd.typeAffinityScore)  -ForegroundColor Magenta
     Write-Host ("    timeOfDayMatch    : {0,6}" -f $bd.timeOfDayMatch)     -ForegroundColor White
     Write-Host ("    contextTimeOfDay  : {0,6}" -f $bd.contextTimeOfDay)   -ForegroundColor White
     Write-Host ("    weekendBoost      : {0,6}" -f $bd.weekendBoost)       -ForegroundColor White
     Write-Host ("    weekdayBoost      : {0,6}" -f $bd.weekdayBoost)       -ForegroundColor White
     Write-Host ("    freshnessBoost    : {0,6}" -f $bd.freshnessBoost)     -ForegroundColor Cyan
     Write-Host ("    explorationBoost  : {0,6}" -f $bd.explorationBoost)   -ForegroundColor Cyan
+    Write-Host ("    seenPenalty       : {0,6}" -f $bd.seenPenalty)        -ForegroundColor Red
+    Write-Host ("    lateNightBoost    : {0,6}" -f $bd.lateNightBoost)      -ForegroundColor DarkCyan
+    Write-Host ("    intentBoost       : {0,6}" -f $bd.intentBoost)         -ForegroundColor Magenta
+    Write-Host ("    detectedIntent    : {0}" -f $bd.detectedIntent)       -ForegroundColor Magenta
+    Write-Host ("    recentBoost       : {0,6}" -f $bd.recentBoost)        -ForegroundColor DarkCyan
+    Write-Host ("    echoChoke         : {0,6}" -f $bd.echoChoke)          -ForegroundColor DarkYellow
+    Write-Host ("    sessionBoost      : {0,6}" -f $bd.sessionBoost)       -ForegroundColor Cyan
+    Write-Host ("    sequenceBoost     : {0,6}" -f $bd.sequenceBoost)      -ForegroundColor Cyan
+    Write-Host ("    typeDivPenalty    : {0,6}" -f $bd.typeDiversityPenalty) -ForegroundColor Red
+    Write-Host ("    popularityScore   : {0,6}" -f $bd.popularityScore)    -ForegroundColor DarkGray
+    Write-Host ("    locationTrend     : {0,6}" -f $bd.locationTrendScore) -ForegroundColor DarkGray
+    Write-Host ("    dominantSessType  : {0}"   -f $bd.dominantSessionType) -ForegroundColor Magenta
+    Write-Host ("    sessionIntent     : {0}"   -f $bd.sessionIntent)      -ForegroundColor Magenta
+    Write-Host ("    embeddingScore    : {0,6}" -f $bd.embeddingScore)     -ForegroundColor Cyan
+    Write-Host ("    longTermAffinity  : {0,6}" -f $bd.longTermAffinityBoost) -ForegroundColor Cyan
+    Write-Host ("    exploitationBoost : {0,6}" -f $bd.exploitationBoost)  -ForegroundColor Green
+    Write-Host ("    explorationBoost  : {0,6}" -f $bd.explorationBoost)   -ForegroundColor DarkGreen
+    Write-Host ("    repeatPenalty     : {0,6}" -f $bd.repeatPenalty)      -ForegroundColor Red
+    Write-Host ("    diversityBoost    : {0,6}" -f $bd.diversityBoost)     -ForegroundColor Green
+    Write-Host ("    modelScore        : {0,6}" -f $bd.modelScore)         -ForegroundColor Magenta
     Write-Host ("    -------------------------")                             -ForegroundColor DarkGray
     Write-Host ("    rawScore          : {0,6}" -f $topResult.rawScore)    -ForegroundColor Yellow
     Write-Host ("    TOTAL (norm.)     : {0,6}" -f $topResult.score)       -ForegroundColor Green
@@ -350,12 +381,12 @@ if ($null -eq $topResult.scoreBreakdown) {
     # 5-C: at least one result in the list must show interaction learning (not necessarily #1)
     $anyLearning = @($recs | Where-Object {
         $b = $_.scoreBreakdown
-        $null -ne $b -and ($b.interactionScore -ne 0 -or $b.affinityBoost -ne 0)
+        $null -ne $b -and ($b.interactionScore -ne 0 -or $b.affinityBoost -ne 0 -or $b.typeAffinityScore -ne 0)
     })
     if ($anyLearning.Count -gt 0) {
-        Print-Pass "Interaction learning present in $($anyLearning.Count) result(s) (interactionScore or affinityBoost != 0)"
+        Print-Pass "Interaction learning present in $($anyLearning.Count) result(s) (interactionScore / affinityBoost / typeAffinityScore)"
     } else {
-        Print-Fail "No result has interactionScore or affinityBoost non-zero -- interaction learning missing"
+        Print-Fail "No result has interactionScore, affinityBoost, or typeAffinityScore non-zero -- interaction learning missing"
     }
 
     # 5-D: v5 fields — freshnessBoost and explorationBoost must exist in breakdown
@@ -397,6 +428,236 @@ if ($null -eq $topResult.scoreBreakdown) {
     } else {
         Print-Warn "Two consecutive places share the same type in top 5 -- diversity may be limited by catalogue size"
     }
+
+    # 5-H: v6 fields — typeAffinityScore and seenPenalty must exist
+    if ($null -ne $bd.PSObject.Properties["typeAffinityScore"]) {
+        Print-Pass "scoreBreakdown.typeAffinityScore present ($($bd.typeAffinityScore))"
+    } else {
+        Print-Fail "scoreBreakdown.typeAffinityScore missing -- v6 upgrade not applied"
+    }
+
+    if ($null -ne $bd.PSObject.Properties["seenPenalty"]) {
+        Print-Pass "scoreBreakdown.seenPenalty present ($($bd.seenPenalty))"
+    } else {
+        Print-Fail "scoreBreakdown.seenPenalty missing -- v6 upgrade not applied"
+    }
+
+    # 5-I: after logging 7 interactions in STEP 3, at least one result should have
+    # a non-zero typeAffinityScore (persistent learning is active)
+    $anyAffinity = @($recs | Where-Object {
+        $b = $_.scoreBreakdown
+        $null -ne $b -and $b.typeAffinityScore -ne 0
+    })
+    if ($anyAffinity.Count -gt 0) {
+        Print-Pass "typeAffinityScore != 0 in $($anyAffinity.Count) result(s) -- persistent learning active"
+    } else {
+        Print-Warn "typeAffinityScore = 0 in all results -- profile.typeAffinity may not have been updated yet"
+    }
+
+    # 5-J: Phase 7 fields — intent, recent memory, late-night, echo chamber
+    $v7Fields = @(
+        @{ name = "lateNightBoost";   prop = "lateNightBoost" },
+        @{ name = "intentBoost";      prop = "intentBoost" },
+        @{ name = "detectedIntent";   prop = "detectedIntent" },
+        @{ name = "recentBoost";      prop = "recentBoost" },
+        @{ name = "echoChoke";        prop = "echoChoke" }
+    )
+    foreach ($f in $v7Fields) {
+        if ($null -ne $bd.PSObject.Properties[$f.prop]) {
+            Print-Pass "scoreBreakdown.$($f.name) present ($($bd.($f.prop)))"
+        } else {
+            Print-Fail "scoreBreakdown.$($f.name) missing -- Phase 7 upgrade not applied"
+        }
+    }
+
+    $validIntents = @("fitness", "social", "relax", "explore")
+    if ($null -eq $bd.detectedIntent) {
+        Print-Fail "scoreBreakdown.detectedIntent is null"
+    } elseif ($validIntents -contains $bd.detectedIntent) {
+        Print-Pass "scoreBreakdown.detectedIntent is a valid intent ('$($bd.detectedIntent)')"
+    } else {
+        Print-Fail "scoreBreakdown.detectedIntent invalid (got '$($bd.detectedIntent)')"
+    }
+
+    # 5-K: Phase 8 fields — session layer, sequence, diversity, cold-start
+    $p8Fields = @(
+        @{ name = "sessionBoost";         prop = "sessionBoost" },
+        @{ name = "sequenceBoost";        prop = "sequenceBoost" },
+        @{ name = "typeDiversityPenalty"; prop = "typeDiversityPenalty" },
+        @{ name = "popularityScore";      prop = "popularityScore" },
+        @{ name = "locationTrendScore";   prop = "locationTrendScore" },
+        @{ name = "dominantSessionType";  prop = "dominantSessionType" },
+        @{ name = "sessionIntent";        prop = "sessionIntent" }
+    )
+    foreach ($f in $p8Fields) {
+        if ($null -ne $bd.PSObject.Properties[$f.prop]) {
+            Print-Pass "scoreBreakdown.$($f.name) present ($($bd.($f.prop)))"
+        } else {
+            Print-Fail "scoreBreakdown.$($f.name) missing -- Phase 8 upgrade not applied"
+        }
+    }
+
+    # 5-L: sessionIntent must be a valid intent string
+    $validSessionIntents = @("fitness", "social", "relax", "explore")
+    if ($null -eq $bd.sessionIntent) {
+        Print-Fail "scoreBreakdown.sessionIntent is null"
+    } elseif ($validSessionIntents -contains $bd.sessionIntent) {
+        Print-Pass "scoreBreakdown.sessionIntent is valid ('$($bd.sessionIntent)')"
+    } else {
+        Print-Fail "scoreBreakdown.sessionIntent invalid (got '$($bd.sessionIntent)')"
+    }
+
+    # 5-M: at least one result should have sessionBoost > 0 after interactions
+    # (may be 0 on a fresh user with no session yet — WARN not FAIL)
+    $anySessionBoost = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and $_.scoreBreakdown.sessionBoost -gt 0
+    })
+    if ($anySessionBoost.Count -gt 0) {
+        Print-Pass "sessionBoost > 0 in $($anySessionBoost.Count) result(s) -- session layer active"
+    } else {
+        Print-Warn "sessionBoost = 0 in all results -- session may be empty (run more interactions first)"
+    }
+
+    # 5-N: at least one result should have sequenceBoost > 0 after interactions
+    $anySequenceBoost = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and $_.scoreBreakdown.sequenceBoost -gt 0
+    })
+    if ($anySequenceBoost.Count -gt 0) {
+        Print-Pass "sequenceBoost > 0 in $($anySequenceBoost.Count) result(s) -- sequential prediction active"
+    } else {
+        Print-Warn "sequenceBoost = 0 in all results -- may fire after more session history is built"
+    }
+
+    # 5-O: Phase 9 fields -- embedding score and long-term affinity boost
+    $p9Fields = @(
+        @{ name = "embeddingScore";        prop = "embeddingScore" },
+        @{ name = "longTermAffinityBoost"; prop = "longTermAffinityBoost" }
+    )
+    foreach ($f in $p9Fields) {
+        if ($null -ne $bd.PSObject.Properties[$f.prop]) {
+            Print-Pass "scoreBreakdown.$($f.name) present ($($bd.($f.prop)))"
+        } else {
+            Print-Fail "scoreBreakdown.$($f.name) missing -- Phase 9 upgrade not applied"
+        }
+    }
+
+    # 5-P: embeddingScore must be in valid range [0, 1]
+    if ($null -ne $bd.PSObject.Properties["embeddingScore"]) {
+        $es = [double]$bd.embeddingScore
+        if ($es -ge 0 -and $es -le 1) {
+            Print-Pass "embeddingScore in valid range [0, 1] ($es)"
+        } else {
+            Print-Fail "embeddingScore out of range: $es (expected 0-1)"
+        }
+    }
+
+    # 5-Q: at least one result should have embeddingScore > 0 after interactions
+    $anyEmbedding = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and [double]$_.scoreBreakdown.embeddingScore -gt 0
+    })
+    if ($anyEmbedding.Count -gt 0) {
+        Print-Pass "embeddingScore > 0 in $($anyEmbedding.Count) result(s) -- long-term memory active"
+    } else {
+        Print-Warn "embeddingScore = 0 in all results -- user embedding may be empty (log more interactions)"
+    }
+
+    # 5-R: Phase 10 fields -- exploitation / exploration / repeat / diversity
+    $p10Fields = @(
+        @{ name = "exploitationBoost"; prop = "exploitationBoost" },
+        @{ name = "repeatPenalty";     prop = "repeatPenalty" },
+        @{ name = "diversityBoost";    prop = "diversityBoost" }
+    )
+    foreach ($f in $p10Fields) {
+        if ($null -ne $bd.PSObject.Properties[$f.prop]) {
+            Print-Pass "scoreBreakdown.$($f.name) present ($($bd.($f.prop)))"
+        } else {
+            Print-Fail "scoreBreakdown.$($f.name) missing -- Phase 10 upgrade not applied"
+        }
+    }
+
+    # explorationBoost already exists from v5 but Phase 10 enhances it -- just confirm it's still there
+    if ($null -ne $bd.PSObject.Properties["explorationBoost"]) {
+        Print-Pass "scoreBreakdown.explorationBoost present (v5 + Phase 10 enhanced: $($bd.explorationBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.explorationBoost missing -- Phase 10 exploration upgrade not applied"
+    }
+
+    # 5-S: at least one result should have exploitationBoost > 0 after interactions
+    $anyExploitation = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and [double]$_.scoreBreakdown.exploitationBoost -gt 0
+    })
+    if ($anyExploitation.Count -gt 0) {
+        Print-Pass "exploitationBoost > 0 in $($anyExploitation.Count) result(s) -- exploitation layer active"
+    } else {
+        Print-Warn "exploitationBoost = 0 in all results -- user embedding may be too low (< 0.2); log more saves/clicks"
+    }
+
+    # 5-T: at least one result should have explorationBoost > 0 (novel types exist in catalogue)
+    $anyExploration = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and [double]$_.scoreBreakdown.explorationBoost -gt 0
+    })
+    if ($anyExploration.Count -gt 0) {
+        Print-Pass "explorationBoost > 0 in $($anyExploration.Count) result(s) -- exploration layer active"
+    } else {
+        Print-Warn "explorationBoost = 0 in all results -- all types may already appear in recent interactions"
+    }
+
+    # 5-U: repeatPenalty should be <= 0 (zero or negative only)
+    if ($null -ne $bd.PSObject.Properties["repeatPenalty"]) {
+        $rp = [double]$bd.repeatPenalty
+        if ($rp -le 0) {
+            Print-Pass "repeatPenalty is <= 0 on top result ($rp) -- correct polarity"
+        } else {
+            Print-Fail "repeatPenalty is positive ($rp) -- penalty must be 0 or negative"
+        }
+    }
+
+    # 5-V: diversityBoost should be >= 0 (zero or positive only)
+    if ($null -ne $bd.PSObject.Properties["diversityBoost"]) {
+        $db = [double]$bd.diversityBoost
+        if ($db -ge 0) {
+            Print-Pass "diversityBoost is >= 0 on top result ($db) -- correct polarity"
+        } else {
+            Print-Fail "diversityBoost is negative ($db) -- boost must be 0 or positive"
+        }
+    }
+
+    # 5-W: top results should not all be the same type (diversity is working)
+    $top5types = @($recs | Select-Object -First 5 | ForEach-Object { $_.type })
+    $uniqueTypes = ($top5types | Sort-Object -Unique).Count
+    if ($uniqueTypes -ge 2) {
+        Print-Pass "Top 5 results span $uniqueTypes distinct types -- recommendations are not monopolised"
+    } else {
+        Print-Warn "Top 5 results are all the same type -- catalogue may be too narrow for diversity"
+    }
+
+    # 5-X: Phase 11 -- modelScore field must exist in scoreBreakdown
+    if ($null -ne $bd.PSObject.Properties["modelScore"]) {
+        Print-Pass "scoreBreakdown.modelScore present ($($bd.modelScore))"
+    } else {
+        Print-Fail "scoreBreakdown.modelScore missing -- Phase 11 AI layer not applied"
+    }
+
+    # 5-Y: modelScore must be a number (0 is valid when model is untrained)
+    if ($null -ne $bd.PSObject.Properties["modelScore"]) {
+        $ms = [double]$bd.modelScore
+        if ($ms -ge -10 -and $ms -le 20) {
+            Print-Pass "modelScore in valid clamped range [-10, 20] ($ms)"
+        } else {
+            Print-Fail "modelScore out of expected range: $ms (expected -10 to 20)"
+        }
+    }
+
+    # 5-Z: if model is untrained (modelScore = 0 for all), warn but don't fail
+    # (first training fires after INITIAL_TRAIN_THRESHOLD interactions)
+    $anyModelScore = @($recs | Where-Object {
+        $null -ne $_.scoreBreakdown -and [double]$_.scoreBreakdown.modelScore -ne 0
+    })
+    if ($anyModelScore.Count -gt 0) {
+        Print-Pass "modelScore != 0 in $($anyModelScore.Count) result(s) -- AI model is active"
+    } else {
+        Print-Warn "modelScore = 0 in all results -- model not yet trained (log >= 10 interactions to trigger first train)"
+    }
 }
 
 # ─── STEP 6: Meta validation ──────────────────────────────────────────────────
@@ -410,6 +671,7 @@ if ($null -eq $meta) {
     Print-Info "meta.routineCount     : $($meta.routineCount)"
     Print-Info "meta.interactionCount : $($meta.interactionCount)"
     Print-Info "meta.topInterestType  : $($meta.topInterestType)"
+    Print-Info "meta.detectedIntent   : $($meta.detectedIntent)"
 
     if ($meta.profileFound -eq $true) {
         Print-Pass "meta.profileFound = true"
@@ -435,13 +697,224 @@ if ($null -eq $meta) {
         Print-Fail "meta.topInterestType is null -- type affinity not being computed"
     }
 
+    # 6-D: Phase 7 — meta.detectedIntent
+    $validMetaIntents = @("fitness", "social", "relax", "explore")
+    if ($null -eq $meta.detectedIntent) {
+        Print-Fail "meta.detectedIntent is missing"
+    } elseif ($validMetaIntents -contains $meta.detectedIntent) {
+        Print-Pass "meta.detectedIntent = '$($meta.detectedIntent)' (Phase 7 intent engine)"
+    } else {
+        Print-Fail "meta.detectedIntent has invalid value '$($meta.detectedIntent)'"
+    }
+
+    $topBd = $recs | Select-Object -First 1 | ForEach-Object { $_.scoreBreakdown }
+    if ($null -ne $topBd -and $meta.detectedIntent -eq $topBd.detectedIntent) {
+        Print-Pass "meta.detectedIntent matches scoreBreakdown on top result"
+    } elseif ($null -eq $topBd) {
+        Print-Warn "Could not compare meta.detectedIntent to breakdown (no scoreBreakdown on top result)"
+    } else {
+        Print-Fail "meta.detectedIntent ('$($meta.detectedIntent)') != top scoreBreakdown.detectedIntent ('$($topBd.detectedIntent)')"
+    }
+
+    # 6-G: Phase 8 — meta.session block
+    if ($null -ne $meta.session) {
+        $sess = $meta.session
+        Print-Info "meta.session.dominantSessionType: $($sess.dominantSessionType)"
+        Print-Info "meta.session.sessionIntent       : $($sess.sessionIntent)"
+        Print-Info "meta.session.recentActionCount   : $($sess.recentActionCount)"
+
+        $validSessIntents = @("fitness", "social", "relax", "explore")
+        if ($validSessIntents -contains $sess.sessionIntent) {
+            Print-Pass "meta.session.sessionIntent is valid ('$($sess.sessionIntent)')"
+        } else {
+            Print-Fail "meta.session.sessionIntent invalid (got '$($sess.sessionIntent)')"
+        }
+
+        if ($sess.recentActionCount -ge 0) {
+            Print-Pass "meta.session.recentActionCount present ($($sess.recentActionCount))"
+        } else {
+            Print-Fail "meta.session.recentActionCount is missing or negative"
+        }
+
+        Print-Pass "meta.session block present (Phase 8 session layer confirmed)"
+    } else {
+        Print-Fail "meta.session is missing -- Phase 8 session meta not returned"
+    }
+
+    # 6-H: Phase 9 — meta.longTerm block
+    if ($null -ne $meta.longTerm) {
+        $lt = $meta.longTerm
+        Print-Info "meta.longTerm.topEmbeddingType  : $($lt.topEmbeddingType)"
+        Print-Info "meta.longTerm.embeddingStrength : $($lt.embeddingStrength)"
+
+        if ($null -ne $lt.embeddingStrength) {
+            $es = [double]$lt.embeddingStrength
+            if ($es -ge 0 -and $es -le 1) {
+                Print-Pass "meta.longTerm.embeddingStrength in valid range [0, 1] ($es)"
+            } else {
+                Print-Fail "meta.longTerm.embeddingStrength out of range: $es"
+            }
+        } else {
+            Print-Fail "meta.longTerm.embeddingStrength is missing"
+        }
+
+        Print-Pass "meta.longTerm block present (Phase 9 long-term memory confirmed)"
+    } else {
+        Print-Fail "meta.longTerm is missing -- Phase 9 embedding meta not returned"
+    }
+
+    # 6-I: Phase 10 — meta.exploration block
+    if ($null -ne $meta.exploration) {
+        $exp = $meta.exploration
+        Print-Info "meta.exploration.explorationWeight  : $($exp.explorationWeight)"
+        Print-Info "meta.exploration.exploitationWeight : $($exp.exploitationWeight)"
+        Print-Info "meta.exploration.explorationActive  : $($exp.explorationActive)"
+
+        # Weights must be in (0, 1)
+        if ($null -ne $exp.explorationWeight) {
+            $ew = [double]$exp.explorationWeight
+            if ($ew -gt 0 -and $ew -lt 1) {
+                Print-Pass "meta.exploration.explorationWeight in valid range (0,1): $ew"
+            } else {
+                Print-Fail "meta.exploration.explorationWeight out of range: $ew (expected between 0 and 1)"
+            }
+        } else {
+            Print-Fail "meta.exploration.explorationWeight is missing"
+        }
+
+        if ($null -ne $exp.exploitationWeight) {
+            $xw = [double]$exp.exploitationWeight
+            if ($xw -gt 0 -and $xw -lt 1) {
+                Print-Pass "meta.exploration.exploitationWeight in valid range (0,1): $xw"
+            } else {
+                Print-Fail "meta.exploration.exploitationWeight out of range: $xw (expected between 0 and 1)"
+            }
+        } else {
+            Print-Fail "meta.exploration.exploitationWeight is missing"
+        }
+
+        # explorationWeight + exploitationWeight should sum to ~1.0
+        if ($null -ne $exp.explorationWeight -and $null -ne $exp.exploitationWeight) {
+            $sum = [double]$exp.explorationWeight + [double]$exp.exploitationWeight
+            if ([math]::Abs($sum - 1.0) -lt 0.001) {
+                Print-Pass "exploration + exploitation weights sum to 1.0 ($sum)"
+            } else {
+                Print-Fail "exploration + exploitation weights do not sum to 1.0 (got $sum)"
+            }
+        }
+
+        if ($exp.explorationActive -eq $true) {
+            Print-Pass "meta.exploration.explorationActive = true"
+        } else {
+            Print-Fail "meta.exploration.explorationActive is not true"
+        }
+
+        Print-Pass "meta.exploration block present (Phase 10 balance engine confirmed)"
+    } else {
+        Print-Fail "meta.exploration is missing -- Phase 10 exploration meta not returned"
+    }
+
+    # 6-J: Phase 11/12 -- meta.ai block
+    if ($null -ne $meta.ai) {
+        $ai = $meta.ai
+        Print-Info "meta.ai.modelActive    : $($ai.modelActive)"
+        Print-Info "meta.ai.modelVersion   : $($ai.modelVersion)"
+        Print-Info "meta.ai.versionNumber  : $($ai.versionNumber)"
+        Print-Info "meta.ai.lastTrainedAt  : $($ai.lastTrainedAt)"
+        Print-Info "meta.ai.sampleCount    : $($ai.sampleCount)"
+
+        # modelActive must be present
+        if ($null -ne $ai.PSObject.Properties["modelActive"]) {
+            Print-Pass "meta.ai.modelActive present ($($ai.modelActive))"
+        } else {
+            Print-Fail "meta.ai.modelActive missing"
+        }
+
+        # modelVersion must be a non-empty string like "v1", "v2"...
+        if ($null -ne $ai.modelVersion -and $ai.modelVersion -match "^v\d+$") {
+            Print-Pass "meta.ai.modelVersion is a valid version string ('$($ai.modelVersion)')"
+        } elseif ($null -ne $ai.modelVersion) {
+            Print-Warn "meta.ai.modelVersion present but unexpected format: '$($ai.modelVersion)'"
+        } else {
+            Print-Fail "meta.ai.modelVersion is missing"
+        }
+
+        # versionNumber must be an integer >= 0
+        if ($null -ne $ai.PSObject.Properties["versionNumber"]) {
+            $vn = [int]$ai.versionNumber
+            if ($vn -ge 0) {
+                Print-Pass "meta.ai.versionNumber is valid ($vn)"
+            } else {
+                Print-Fail "meta.ai.versionNumber is negative ($vn)"
+            }
+        } else {
+            Print-Fail "meta.ai.versionNumber missing -- Phase 12 version tracking not applied"
+        }
+
+        # sampleCount must be an integer >= 0
+        if ($null -ne $ai.PSObject.Properties["sampleCount"]) {
+            $sc = [int]$ai.sampleCount
+            if ($sc -ge 0) {
+                Print-Pass "meta.ai.sampleCount is valid ($sc)"
+            } else {
+                Print-Fail "meta.ai.sampleCount is negative ($sc)"
+            }
+        } else {
+            Print-Fail "meta.ai.sampleCount missing"
+        }
+
+        # lastTrainedAt is null until first training run -- warn, not fail
+        if ($null -ne $ai.lastTrainedAt) {
+            Print-Pass "meta.ai.lastTrainedAt present ('$($ai.lastTrainedAt)') -- model has been trained"
+        } else {
+            Print-Warn "meta.ai.lastTrainedAt is null -- model not trained yet (log >= 10 interactions to trigger)"
+        }
+
+        # modelActive / versionNumber consistency
+        if ($ai.modelActive -eq $true -and [int]$ai.versionNumber -ge 1) {
+            Print-Pass "meta.ai.modelActive=true and versionNumber >= 1 -- Phase 12 AI layer is live"
+        } elseif ($ai.modelActive -eq $false) {
+            Print-Warn "meta.ai.modelActive=false -- model is untrained; rule engine handles scoring"
+        } else {
+            Print-Fail "meta.ai.modelActive/versionNumber inconsistency"
+        }
+
+        Print-Pass "meta.ai block present (Phase 11/12 AI pipeline confirmed)"
+    } else {
+        Print-Fail "meta.ai is missing -- Phase 11/12 AI meta not returned"
+    }
+
+    # 6-K: Phase 13 -- meta.learning block
+    if ($null -ne $meta.learning) {
+        $lr = $meta.learning
+        Print-Info "meta.learning.recencyWeightActive   : $($lr.recencyWeightActive)"
+        Print-Info "meta.learning.behaviorShiftDetected : $($lr.behaviorShiftDetected)"
+
+        if ($lr.recencyWeightActive -eq $true) {
+            Print-Pass "meta.learning.recencyWeightActive = true"
+        } else {
+            Print-Fail "meta.learning.recencyWeightActive is not true"
+        }
+
+        if ($null -ne $lr.PSObject.Properties["behaviorShiftDetected"]) {
+            Print-Pass "meta.learning.behaviorShiftDetected present ($($lr.behaviorShiftDetected))"
+        } else {
+            Print-Fail "meta.learning.behaviorShiftDetected missing"
+        }
+
+        Print-Pass "meta.learning block present (Phase 13 feedback loop confirmed)"
+    } else {
+        Print-Fail "meta.learning is missing -- Phase 13 learning meta not returned"
+    }
+
     # 6-E: meta.context must be present (added in v4 when debug=true)
     if ($null -ne $meta.context) {
         $ctx = $meta.context
-        Print-Info "meta.context.hour      : $($ctx.hour)"
-        Print-Info "meta.context.timeOfDay : $($ctx.timeOfDay)"
-        Print-Info "meta.context.isWeekend : $($ctx.isWeekend)"
-        Print-Info "meta.context.dayName   : $($ctx.dayName)"
+        Print-Info "meta.context.hour       : $($ctx.hour)"
+        Print-Info "meta.context.timeOfDay  : $($ctx.timeOfDay)"
+        Print-Info "meta.context.isWeekend  : $($ctx.isWeekend)"
+        Print-Info "meta.context.isLateNight: $($ctx.isLateNight)"
+        Print-Info "meta.context.dayName    : $($ctx.dayName)"
 
         $validTimeOfDay = @("morning", "afternoon", "evening", "night")
         if ($validTimeOfDay -contains $ctx.timeOfDay) {
@@ -460,6 +933,16 @@ if ($null -eq $meta) {
             Print-Pass "meta.context.hour in valid range ($($ctx.hour))"
         } else {
             Print-Fail "meta.context.hour out of range (got $($ctx.hour))"
+        }
+
+        # Phase 7: isLateNight must match night band (23–4) vs hour
+        $expectedLateNight = ($ctx.hour -ge 23 -or $ctx.hour -lt 5)
+        if ($null -ne $ctx.isLateNight -and $ctx.isLateNight -eq $expectedLateNight) {
+            Print-Pass "meta.context.isLateNight = $($ctx.isLateNight) (consistent with hour $($ctx.hour))"
+        } elseif ($null -eq $ctx.isLateNight) {
+            Print-Fail "meta.context.isLateNight is missing -- Phase 7 context upgrade not applied"
+        } else {
+            Print-Fail "meta.context.isLateNight ($($ctx.isLateNight)) inconsistent with hour $($ctx.hour)"
         }
     } else {
         Print-Fail "meta.context is missing -- context-aware scoring not returning context (debug=true required)"

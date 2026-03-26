@@ -9,13 +9,23 @@
  *   Document ID: uid  (Firebase Authentication UID)
  *
  *   Fields:
- *     uid       {string}  — Firebase Auth UID
- *     email     {string|null}  — user's email address
- *     name      {string|null}  — display name from the ID token (if set)
- *     createdAt {string}  — ISO 8601 timestamp of first login
+ *     uid                {string}         — Firebase Auth UID
+ *     email              {string|null}    — user's email address
+ *     name               {string|null}    — display name from the ID token (if set)
+ *     createdAt          {string}         — ISO 8601 timestamp of first login
+ *     updatedAt          {string}         — ISO 8601 timestamp of last profile change
+ *     interests          {string[]}       — activity/interest tags
+ *     budgetRange        {string}         — "low" | "medium" | "high"
+ *     locationPreference {string}         — "indoor" | "outdoor" | "any"
+ *     typeAffinity       {object}         — { [placeType]: number } persistent affinity scores (v6)
+ *     seenPlaces         {string[]}       — ordered list of place ids the user has engaged with
+ *     embedding          {object}         — { [dimension]: float 0-1 } long-term taste vector (v9)
+ *     (Phase 13) typeAffinity updates use repeat reinforcement + global scale-down
+ *                when the map magnitude grows too large.
  */
 
 import { db } from "../config/firebase.js";
+import { normalizeEmbedding } from "../utils/embedding.js";
 
 /** Firestore collection name — single source of truth */
 const USERS_COLLECTION = "users";
@@ -113,4 +123,137 @@ export const updateUserProfile = async (uid, updates) => {
 
   const updated = await userRef.get();
   return updated.data();
+};
+
+// ─── Affinity weights for real-time learning ─────────────────────────────────
+// These are distinct from the interaction.service ACTION_SCORES which measure
+// individual event value. These weights specifically drive the persistent
+// per-type affinity model that lives on the user document.
+
+export const AFFINITY_WEIGHTS = Object.freeze({
+  view:    1,
+  click:   2,
+  save:    4,   // stronger signal than the transient +3 in ACTION_SCORES
+  dismiss: -3,
+});
+
+/** Maximum absolute value stored in typeAffinity for any single type. */
+const AFFINITY_CAP = 50;
+
+/**
+ * When the largest |typeAffinity| across all types exceeds this value, the
+ * entire map is scaled down proportionally (Phase 13 — prevents slow drift explosion).
+ */
+const AFFINITY_MAP_RESCALE_THRESHOLD = 45;
+
+// ─── Embedding learning rates (Phase 9) ──────────────────────────────────────
+// How much each action type shifts the user's embedding for the interacted type.
+// Values are small deltas applied to the [0, 1] embedding space.
+
+export const EMBEDDING_LEARNING_RATES = Object.freeze({
+  view:    0.03,
+  click:   0.08,
+  save:    0.15,
+  dismiss: -0.10,
+});
+
+/**
+ * Scales all typeAffinity entries proportionally when max |v| exceeds threshold.
+ *
+ * @param {Record<string, number>} map
+ * @returns {Record<string, number>}
+ */
+const rescaleAffinityMapIfNeeded = (map) => {
+  let maxAbs = 0;
+  for (const v of Object.values(map)) {
+    const a = Math.abs(v ?? 0);
+    if (a > maxAbs) maxAbs = a;
+  }
+  if (maxAbs <= AFFINITY_MAP_RESCALE_THRESHOLD || maxAbs === 0) return map;
+
+  const scale = AFFINITY_MAP_RESCALE_THRESHOLD / maxAbs;
+  const out   = {};
+  for (const [k, v] of Object.entries(map)) {
+    out[k] = (v ?? 0) * scale;
+  }
+  return out;
+};
+
+/**
+ * Updates the user's persistent intelligence after a new interaction.
+ *
+ * Three things happen in a single atomic Firestore update:
+ *   1. typeAffinity is updated with affinity weight + Phase 13 repeat bonus,
+ *      per-key cap, and optional global rescale when the map grows too large.
+ *   2. The placeId is prepended to seenPlaces (if it isn't already the most
+ *      recent entry) and the list is trimmed to the last 200 entries.
+ *   3. (Phase 9) embedding[placeType] is shifted by EMBEDDING_LEARNING_RATES
+ *      and the whole vector is re-normalized so all values stay in [0, 1].
+ *
+ * This function is fire-and-forget from the caller's perspective — it does not
+ * throw on failure (logs a warning instead) so that interaction logging always
+ * succeeds even if the intelligence update has a transient error.
+ *
+ * @param {string} uid        — Firebase Auth UID
+ * @param {string} placeType  — catalogue place type, e.g. "gym"
+ * @param {string} placeId    — catalogue place id (Firestore doc id)
+ * @param {string} actionType — one of "view" | "click" | "save" | "dismiss"
+ */
+export const updateUserIntelligence = async (uid, placeType, placeId, actionType) => {
+  const affinityWeight   = AFFINITY_WEIGHTS[actionType]        ?? 0;
+  const embeddingDelta   = EMBEDDING_LEARNING_RATES[actionType] ?? 0;
+  if (!placeType) return;
+
+  try {
+    const userRef  = db.collection(USERS_COLLECTION).doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) return;
+
+    const data         = userSnap.data();
+
+    // ── typeAffinity update ────────────────────────────────────────────────────
+    const current      = data.typeAffinity ?? {};
+    const currentValue = current[placeType] ?? 0;
+
+    // Phase 13: reinforce repeated positive engagement with this type.
+    const repeatBonus =
+      affinityWeight > 0 && currentValue > 0
+        ? Math.min(2, affinityWeight * 0.2 + Math.min(1, currentValue / 25))
+        : 0;
+
+    const delta        = affinityWeight + repeatBonus;
+    let nextMap        = { ...current, [placeType]: currentValue + delta };
+    nextMap[placeType] = Math.min(AFFINITY_CAP, Math.max(-AFFINITY_CAP, nextMap[placeType]));
+
+    nextMap = rescaleAffinityMapIfNeeded(nextMap);
+    const newValue = nextMap[placeType];
+
+    // ── seenPlaces update ──────────────────────────────────────────────────────
+    const seen        = Array.isArray(data.seenPlaces) ? data.seenPlaces : [];
+    const updatedSeen = seen[0] === placeId
+      ? seen
+      : [placeId, ...seen.filter((id) => id !== placeId)].slice(0, 200);
+
+    // ── embedding update (Phase 9) ─────────────────────────────────────────────
+    const prevEmbedding  = data.embedding ?? {};
+    const prevTypeValue  = prevEmbedding[placeType] ?? 0;
+    const nextTypeValue  = Math.min(1, Math.max(0, prevTypeValue + embeddingDelta));
+    const rawEmbedding   = { ...prevEmbedding, [placeType]: nextTypeValue };
+    const nextEmbedding  = normalizeEmbedding(rawEmbedding);
+
+    await userRef.update({
+      typeAffinity: nextMap,
+      seenPlaces:   updatedSeen,
+      embedding:    nextEmbedding,
+      updatedAt:  new Date().toISOString(),
+    });
+
+    console.log(
+      `[intelligence] uid=${uid} type=${placeType}` +
+      ` affinity=${currentValue}->${newValue}` +
+      ` embed=${prevTypeValue.toFixed(3)}->${nextTypeValue.toFixed(3)}`
+    );
+  } catch (err) {
+    console.warn(`[intelligence] Failed to update intelligence for uid=${uid}:`, err.message);
+  }
 };

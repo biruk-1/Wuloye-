@@ -9,22 +9,76 @@
  *   click   → +2
  *   save    → +3
  *   dismiss → -1
+ *
+ * Real-time learning (v6):
+ *   After each interaction is persisted, updateUserIntelligence() is called
+ *   to update the user's typeAffinity map and seenPlaces list on their profile
+ *   document.  This ensures the NEXT recommendation request immediately sees
+ *   the updated signals — no cache delay for the learning layer.
+ *
+ * Session memory (Phase 8):
+ *   updateSession() is called concurrently with updateUserIntelligence() so
+ *   the short-term session queue is advanced on every interaction.  Failure
+ *   is non-fatal — the interaction write and intelligence update are unaffected.
  */
 
 import { db } from "../config/firebase.js";
+import { updateUserIntelligence } from "./user.service.js";
+import { getAllPlaces }            from "./place.service.js";
+import { SEED_PLACES }             from "../data/places.seed.js";
+import { updateSession }           from "./session.service.js";
+import { maybeRetrain }            from "../jobs/retrainModel.js";
 
 const INTERACTIONS_COLLECTION = "interactions";
 
 /** Allowed actionType values and their corresponding scores. */
 export const ACTION_SCORES = Object.freeze({
-  view: 1,
-  click: 2,
-  save: 3,
+  view:    1,
+  click:   2,
+  save:    3,
   dismiss: -1,
 });
 
+// ─── Place-type resolver ──────────────────────────────────────────────────────
+
 /**
- * Persist a new interaction document.
+ * Resolves a placeId to a place type so we can update typeAffinity.
+ *
+ * Strategy (in order):
+ *   1. Check live catalogue (getAllPlaces — cached, fast after first call)
+ *   2. Fall back to SEED_PLACES id lookup (handles place_1 style ids)
+ *   3. Return null if unresolvable (affinity update is skipped gracefully)
+ *
+ * @param {string} placeId
+ * @returns {Promise<{ catalogueId: string|null, type: string|null }>}
+ */
+const resolvePlaceInfo = async (placeId) => {
+  try {
+    const places = await getAllPlaces();
+
+    // Direct match on Firestore doc id.
+    let match = places.find((p) => p.id === placeId);
+
+    // Fall back to seed id alias (e.g. "place_1" → "Downtown Gym" → live doc).
+    if (!match) {
+      const seedEntry = SEED_PLACES.find((s) => s.id === placeId);
+      if (seedEntry) {
+        match = places.find((p) => p.name === seedEntry.name && p.type === seedEntry.type);
+      }
+    }
+
+    return match
+      ? { catalogueId: match.id, type: match.type }
+      : { catalogueId: null,     type: null };
+  } catch {
+    return { catalogueId: null, type: null };
+  }
+};
+
+// ─── Core service functions ───────────────────────────────────────────────────
+
+/**
+ * Persist a new interaction document and update the user's intelligence model.
  *
  * @param {string} userId     - uid from the verified Firebase token
  * @param {string} placeId    - identifier of the place being interacted with
@@ -40,12 +94,31 @@ export const createInteraction = async (userId, placeId, actionType, metadata = 
     userId,
     placeId,
     actionType,
-    score: ACTION_SCORES[actionType],
-    metadata: metadata ?? null,
+    score:     ACTION_SCORES[actionType],
+    metadata:  metadata ?? null,
     createdAt: new Date().toISOString(),
   };
 
+  // Persist the interaction first so it's never lost even if intelligence update fails.
   await docRef.set(interaction);
+
+  // Resolve the place type, then update the user's persistent intelligence
+  // and session queue concurrently.  Both are side-effects — neither blocks
+  // the caller's response and neither can roll back the interaction write.
+  const { catalogueId, type } = await resolvePlaceInfo(placeId);
+  const effectivePlaceId = catalogueId ?? placeId;
+
+  await Promise.all([
+    updateUserIntelligence(userId, type, effectivePlaceId, actionType),
+    updateSession(userId, { placeId: effectivePlaceId, type, actionType }),
+  ]);
+
+  // Fire-and-forget: check if a model retrain is due.
+  // Never awaited — failures are warned but never surface to the caller.
+  maybeRetrain().catch((err) =>
+    console.warn(`[interaction] retrainModel check failed: ${err.message}`)
+  );
+
   return interaction;
 };
 

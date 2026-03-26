@@ -7,10 +7,12 @@
  * `new Date()` directly.
  *
  * Context schema:
- *   hour       {number}  — 0–23, current server hour
- *   timeOfDay  {string}  — "morning" | "afternoon" | "evening" | "night"
- *   isWeekend  {boolean} — true on Saturday (6) and Sunday (0)
- *   dayName    {string}  — e.g. "Monday", useful for debug / logging
+ *   hour        {number}  — 0–23, current server hour
+ *   timeOfDay   {string}  — "morning" | "afternoon" | "evening" | "night"
+ *   isWeekend   {boolean} — true on Saturday (6) and Sunday (0)
+ *   isLateNight {boolean} — true when hour is in the night band (23:00 – 04:59)
+ *                           Convenience flag used by v7 late-night scoring rules.
+ *   dayName     {string}  — e.g. "Monday", useful for debug / logging
  *
  * Time-of-day bands:
  *   morning    05:00 – 11:59
@@ -47,8 +49,9 @@ export const buildContext = (now = new Date()) => {
 
   return {
     hour,
-    timeOfDay: hourToTimeOfDay(hour),
-    isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
-    dayName:   DAY_NAMES[dayOfWeek],
+    timeOfDay:   hourToTimeOfDay(hour),
+    isWeekend:   dayOfWeek === 0 || dayOfWeek === 6,
+    isLateNight: hour >= 23 || hour < 5,
+    dayName:     DAY_NAMES[dayOfWeek],
   };
 };
