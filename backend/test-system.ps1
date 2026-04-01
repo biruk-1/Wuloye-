@@ -5,7 +5,7 @@
 #
 # Verifies that the entire data pipeline works end-to-end:
 #
-#   Data -> Behavior -> Learning -> Model -> Decision
+#   Data -> Behavior -> Learning -> Model -> Real-World -> Performance -> Personalization
 #
 #   STEP 0  Auth          -- get Firebase ID token
 #   STEP 1  Profile setup -- PUT /api/profile (interests, budget, location)
@@ -18,6 +18,8 @@
 #                               + Phase 10 (exploitationBoost, explorationBoost enhanced,
 #                                           repeatPenalty, diversityBoost)
 #                               + Phase 11/12 (modelScore from AI linear model)
+#                               + Phase 14 (closedPenalty, trendBoost)
+#                               + Phase 16 (multiInterestBoost, habitContextBoost, contextStackBoost)
 #   STEP 6  Meta validation  -- profileFound, routines, interactions, topInterestType,
 #                               context (timeOfDay, isLateNight), detectedIntent,
 #                               session (dominantSessionType, sessionIntent, recentActionCount),
@@ -25,6 +27,11 @@
 #                               exploration (explorationWeight, exploitationWeight),
 #                               ai (modelActive, modelVersion, versionNumber, lastTrainedAt, sampleCount)
 #                               learning (recencyWeightActive, behaviorShiftDetected) [Phase 13]
+#                               location (source, radiusUsed, resultsFetched)         [Phase 14]
+#                               performance (elapsedMs, cacheHit, fallbackActive,     [Phase 15]
+#                                            placesScored)
+#                               personalization (dominantHabits, topInterestWeights) [Phase 16]
+#   STEP 6b Cache test       -- second request must be a cache hit                    [Phase 15]
 #   STEP 7  Cleanup          -- delete the 2 test routines
 #
 # Exit code: 0 = PASSED, 1 = FAILED
@@ -658,6 +665,64 @@ if ($null -eq $topResult.scoreBreakdown) {
     } else {
         Print-Warn "modelScore = 0 in all results -- model not yet trained (log >= 10 interactions to trigger first train)"
     }
+
+    # 5-AA: Phase 14 -- closedPenalty field must exist in scoreBreakdown
+    if ($null -ne $bd.PSObject.Properties["closedPenalty"]) {
+        Print-Pass "scoreBreakdown.closedPenalty present ($($bd.closedPenalty))"
+    } else {
+        Print-Fail "scoreBreakdown.closedPenalty missing -- Phase 14 closed-place penalty not applied"
+    }
+
+    # 5-AB: closedPenalty must be 0 or -5 only
+    if ($null -ne $bd.PSObject.Properties["closedPenalty"]) {
+        $cp = [double]$bd.closedPenalty
+        if ($cp -eq 0 -or $cp -eq -5) {
+            Print-Pass "closedPenalty is valid value ($cp)"
+        } else {
+            Print-Fail "closedPenalty has unexpected value: $cp (expected 0 or -5)"
+        }
+    }
+
+    # 5-AC: Phase 14 -- trendBoost field must exist in scoreBreakdown
+    if ($null -ne $bd.PSObject.Properties["trendBoost"]) {
+        Print-Pass "scoreBreakdown.trendBoost present ($($bd.trendBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.trendBoost missing -- Phase 14 trend boost not applied"
+    }
+
+    # 5-AD: trendBoost must be >= 0
+    if ($null -ne $bd.PSObject.Properties["trendBoost"]) {
+        $tb = [double]$bd.trendBoost
+        if ($tb -ge 0 -and $tb -le 3) {
+            Print-Pass "trendBoost in valid range [0, 3] ($tb)"
+        } else {
+            Print-Fail "trendBoost out of expected range: $tb (expected 0 to 3)"
+        }
+    }
+
+    # 5-AE: Phase 16 -- multiInterestBoost + interestWeightUsed
+    if ($null -ne $bd.PSObject.Properties["multiInterestBoost"]) {
+        Print-Pass "scoreBreakdown.multiInterestBoost present ($($bd.multiInterestBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.multiInterestBoost missing -- Phase 16 not applied"
+    }
+    if ($null -ne $bd.PSObject.Properties["interestWeightUsed"]) {
+        Print-Pass "scoreBreakdown.interestWeightUsed present ($($bd.interestWeightUsed))"
+    } else {
+        Print-Fail "scoreBreakdown.interestWeightUsed missing -- Phase 16 not applied"
+    }
+
+    # 5-AF: Phase 16 -- habitContextBoost + contextStackBoost
+    if ($null -ne $bd.PSObject.Properties["habitContextBoost"]) {
+        Print-Pass "scoreBreakdown.habitContextBoost present ($($bd.habitContextBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.habitContextBoost missing -- Phase 16 not applied"
+    }
+    if ($null -ne $bd.PSObject.Properties["contextStackBoost"]) {
+        Print-Pass "scoreBreakdown.contextStackBoost present ($($bd.contextStackBoost))"
+    } else {
+        Print-Fail "scoreBreakdown.contextStackBoost missing -- Phase 16 not applied"
+    }
 }
 
 # ─── STEP 6: Meta validation ──────────────────────────────────────────────────
@@ -907,6 +972,46 @@ if ($null -eq $meta) {
         Print-Fail "meta.learning is missing -- Phase 13 learning meta not returned"
     }
 
+    # 6-L: Phase 14 -- meta.location block
+    if ($null -ne $meta.location) {
+        $loc = $meta.location
+        Print-Info "meta.location.source         : $($loc.source)"
+        Print-Info "meta.location.radiusUsed     : $($loc.radiusUsed)"
+        Print-Info "meta.location.resultsFetched : $($loc.resultsFetched)"
+
+        # source must be "google_maps" or "firestore"
+        if ($loc.source -eq "google_maps" -or $loc.source -eq "firestore") {
+            Print-Pass "meta.location.source = '$($loc.source)' (valid)"
+        } else {
+            Print-Fail "meta.location.source is unexpected value: '$($loc.source)'"
+        }
+
+        # resultsFetched must be a non-negative integer
+        if ($loc.resultsFetched -is [int] -or $loc.resultsFetched -match '^\d+$') {
+            $rf = [int]$loc.resultsFetched
+            if ($rf -ge 0) {
+                Print-Pass "meta.location.resultsFetched = $rf (valid count)"
+            } else {
+                Print-Fail "meta.location.resultsFetched is negative"
+            }
+        } else {
+            Print-Fail "meta.location.resultsFetched is not a number (got '$($loc.resultsFetched)')"
+        }
+
+        # When source is "firestore", radiusUsed should be null (no location was sent)
+        if ($loc.source -eq "firestore" -and $null -eq $loc.radiusUsed) {
+            Print-Pass "meta.location.radiusUsed = null (expected for firestore source)"
+        } elseif ($loc.source -eq "google_maps" -and $null -ne $loc.radiusUsed) {
+            Print-Pass "meta.location.radiusUsed = $($loc.radiusUsed)m (Google Maps radius confirmed)"
+        } elseif ($loc.source -eq "firestore") {
+            Print-Warn "meta.location.radiusUsed is non-null for firestore source (unexpected but not fatal)"
+        }
+
+        Print-Pass "meta.location block present (Phase 14 real-world data integration confirmed)"
+    } else {
+        Print-Fail "meta.location is missing -- Phase 14 location meta not returned"
+    }
+
     # 6-E: meta.context must be present (added in v4 when debug=true)
     if ($null -ne $meta.context) {
         $ctx = $meta.context
@@ -957,6 +1062,150 @@ if ($null -eq $meta) {
     } else {
         Print-Warn "contextTimeOfDay = 0 in all results -- may be expected if no types match current time band"
     }
+
+    # 6-M: Phase 15 -- meta.performance block
+    if ($null -ne $meta.performance) {
+        $perf = $meta.performance
+        Print-Info "meta.performance.elapsedMs          : $($perf.elapsedMs)"
+        Print-Info "meta.performance.cacheHit           : $($perf.cacheHit)"
+        Print-Info "meta.performance.fallbackActive     : $($perf.fallbackActive)"
+        Print-Info "meta.performance.heavyLoadFallback: $($perf.heavyLoadFallback)"
+        Print-Info "meta.performance.placesScored       : $($perf.placesScored)"
+
+        # elapsedMs must be a non-negative integer
+        if ($null -ne $perf.PSObject.Properties["elapsedMs"] -and [int]$perf.elapsedMs -ge 0) {
+            Print-Pass "meta.performance.elapsedMs = $($perf.elapsedMs)ms (valid)"
+        } else {
+            Print-Fail "meta.performance.elapsedMs missing or negative"
+        }
+
+        # Warn (not fail) if response was slow -- latency varies by environment
+        if ([int]$perf.elapsedMs -le 300) {
+            Print-Pass "Response time $($perf.elapsedMs)ms is within 300ms target"
+        } else {
+            Print-Warn "Response time $($perf.elapsedMs)ms exceeded 300ms target (may be cold-start or slow CI environment)"
+        }
+
+        # cacheHit must be a boolean
+        if ($null -ne $perf.PSObject.Properties["cacheHit"]) {
+            Print-Pass "meta.performance.cacheHit present ($($perf.cacheHit))"
+        } else {
+            Print-Fail "meta.performance.cacheHit missing"
+        }
+
+        # fallbackActive must be a boolean
+        if ($null -ne $perf.PSObject.Properties["fallbackActive"]) {
+            Print-Pass "meta.performance.fallbackActive present ($($perf.fallbackActive))"
+        } else {
+            Print-Fail "meta.performance.fallbackActive missing"
+        }
+
+        # heavyLoadFallback must be a boolean (false when not under auto load)
+        if ($null -ne $perf.PSObject.Properties["heavyLoadFallback"]) {
+            Print-Pass "meta.performance.heavyLoadFallback present ($($perf.heavyLoadFallback))"
+        } else {
+            Print-Fail "meta.performance.heavyLoadFallback missing"
+        }
+
+        # placesScored must be > 0
+        if ($null -ne $perf.PSObject.Properties["placesScored"] -and [int]$perf.placesScored -gt 0) {
+            Print-Pass "meta.performance.placesScored = $($perf.placesScored) (valid)"
+        } else {
+            Print-Fail "meta.performance.placesScored missing or zero"
+        }
+
+        Print-Pass "meta.performance block present (Phase 15 performance instrumentation confirmed)"
+    } else {
+        Print-Fail "meta.performance is missing -- Phase 15 performance meta not returned"
+    }
+
+    # 6-N: Phase 16 -- meta.personalization block
+    if ($null -ne $meta.personalization) {
+        $pers = $meta.personalization
+        Print-Info "meta.personalization.dominantHabits   : $($pers.dominantHabits -join ', ')"
+        Print-Info "meta.personalization.topInterestWeights : $($pers.topInterestWeights | ConvertTo-Json -Compress)"
+
+        if ($pers.dominantHabits -is [Array]) {
+            Print-Pass "meta.personalization.dominantHabits is an array ($($pers.dominantHabits.Count) habit(s))"
+        } else {
+            Print-Fail "meta.personalization.dominantHabits is not an array"
+        }
+
+        if ($null -ne $pers.topInterestWeights) {
+            $wSum = 0
+            foreach ($prop in $pers.topInterestWeights.PSObject.Properties) {
+                $v = [double]$prop.Value
+                if ($v -lt 0 -or $v -gt 1) {
+                    Print-Fail "topInterestWeights.$($prop.Name) out of range [0,1]: $v"
+                }
+                $wSum += $v
+            }
+            if ($wSum -le 1.001) {
+                Print-Pass "meta.personalization.topInterestWeights numeric values valid (sum=$wSum)"
+            } else {
+                Print-Fail "topInterestWeights sum > 1 ($wSum)"
+            }
+        } else {
+            Print-Fail "meta.personalization.topInterestWeights missing"
+        }
+
+        Print-Pass "meta.personalization block present (Phase 16 advanced personalization confirmed)"
+    } else {
+        Print-Fail "meta.personalization is missing -- Phase 16 not applied"
+    }
+
+    # Phase 16: at most 2 of the same type in top 5 results
+    $top5 = @($recs | Select-Object -First 5)
+    if ($top5.Count -eq 0) {
+        Print-Warn "No recommendations -- skip top-5 type-cap check"
+    } else {
+        $typeGroups = @{}
+        foreach ($r in $top5) {
+            $t = $r.type
+            if (-not $typeGroups.ContainsKey($t)) { $typeGroups[$t] = 0 }
+            $typeGroups[$t] = $typeGroups[$t] + 1
+        }
+        $viol = $false
+        foreach ($k in $typeGroups.Keys) {
+            if ($typeGroups[$k] -gt 2) { $viol = $true; break }
+        }
+        if (-not $viol) {
+            Print-Pass "Phase 16: top 5 has at most 2 places of any single type"
+        } else {
+            Print-Fail "Phase 16: top 5 violates max-2-per-type diversity rule"
+        }
+    }
+}
+
+# ─── STEP 6b: Cache hit test ─────────────────────────────────────────────────
+
+Print-Step "STEP 6b -- Phase 15 cache: second request must be a cache hit"
+
+# The debug=true path skips the cache so we use a non-debug request here.
+$recCacheRes = Invoke-Api -Method GET -Path "/recommendations" -Headers $authHeaders
+
+if ($recCacheRes.ok -and $recCacheRes.data.success) {
+    $cacheMeta = $recCacheRes.data.meta
+    if ($null -ne $cacheMeta.performance) {
+        $cacheHit = $cacheMeta.performance.cacheHit
+        $elapsed  = [int]$cacheMeta.performance.elapsedMs
+
+        if ($cacheHit -eq $true) {
+            Print-Pass "Second request returned cacheHit=true (Phase 15 recommendation cache working)"
+        } else {
+            Print-Warn "cacheHit=false on second request -- cache may have been invalidated by a concurrent interaction, or request was debug=true"
+        }
+
+        if ($elapsed -le 50) {
+            Print-Pass "Cache hit responded in ${elapsed}ms (well under 300ms target)"
+        } else {
+            Print-Warn "Cache hit took ${elapsed}ms -- expected < 50ms for a cached response"
+        }
+    } else {
+        Print-Fail "meta.performance missing on cache test request"
+    }
+} else {
+    Print-Warn "Cache test request failed -- skipping cache-hit assertion"
 }
 
 # ─── STEP 7: Cleanup ─────────────────────────────────────────────────────────

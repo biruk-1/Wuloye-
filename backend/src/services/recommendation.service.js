@@ -1,5 +1,39 @@
 /**
- * recommendation.service.js — Personalized recommendation engine (v13).
+ * recommendation.service.js — Personalized recommendation engine (v16).
+ *
+ * v16 change: advanced personalization layer.
+ *   - buildTopInterestWeights: recency + decay + typeAffinity + declared interests →
+ *     normalized weights; multiInterestBoost scales with rank among top-K types.
+ *   - detectDominantHabits: morning_gym, weekend_social, weekend_coffee from timestamps.
+ *   - habitContextBoost: current context matches habit + place type.
+ *   - contextStackBoost: sessionIntent + detectedIntent + place type + habit/weight align.
+ *   - enforceMaxSameTypeInTopN: max 2 identical types in top 5 after final ordering.
+ *   - meta.personalization: { dominantHabits, topInterestWeights }.
+ *
+ * v15 change: performance optimization and scaling.
+ *   - Recommendation cache: TTL configurable (RECOMMENDATION_CACHE_TTL_MS, default 5 min).
+ *     Cache hits skip Firestore and scoring.  Debug requests never cached.
+ *   - Profile data cache: 4 Firestore reads bundled 30 s (profileDataCache).
+ *   - derivedSignalsCache: precomputed affinity maps + interaction index + signal
+ *     sets per user/location/fingerprint (60 s TTL); invalidated on interaction.
+ *   - Parallel scoring: places scored in chunks via setImmediate + Promise.all.
+ *   - Load fallback: RECOMMENDATIONS_HIGH_LOAD=true or concurrent requests
+ *     > RECOMMENDATION_HIGH_LOAD_CONCURRENT auto-enables fast mode (skip Rule 21+25).
+ *   - Fast mode: ?fast=true — same as load fallback; meta.performance.heavyLoadFallback
+ *     distinguishes auto vs explicit.
+ *   - Batch interactions: POST /api/interactions/batch — single Firestore batch write.
+ *   - meta.performance: elapsedMs, cacheHit, fallbackActive, heavyLoadFallback, placesScored.
+ *   - Target <300 ms: SLOW log when exceeded; Redis optional (in-memory TtlCache default).
+ *
+ * v14 change: real-world data integration via Google Maps Places API.
+ *   - getRecommendations() accepts an optional userLocation { lat, lng, radiusMeters }.
+ *     When provided (and GOOGLE_MAPS_API_KEY is set), the place catalogue is sourced
+ *     from Google Maps Nearby Search instead of static Firestore data.
+ *   - Rule 26: closedPenalty (-5) applied when place.isOpen === false.
+ *   - Rule 27: trendBoost (0–3) applied when place.trendScore >= 0.5 (trending places
+ *     detected from high rating × high review volume via Google data).
+ *   - meta.location: { source, radiusUsed, resultsFetched } added to response.
+ *   - Fully backwards-compatible: falls back to Firestore when no location or key.
  *
  * v13 change: feedback-loop optimization.
  *   - interactionAgeDecayWeight: last 24h=1.0, 24h–7d=0.7, 7d+=0.4 applied to
@@ -71,9 +105,31 @@ import {
   detectBehaviorShift,
   balanceLearningSignals,
 } from "../utils/learning.js";
+import {
+  recommendationCache,
+  profileDataCache,
+  derivedSignalsCache,
+} from "../utils/cache.js";
+import {
+  buildTopInterestWeights,
+  multiInterestBalanceBoost,
+  detectDominantHabits,
+  computeHabitContextBoost,
+  computeContextStackBoost,
+  topWeightsForMeta,
+  enforceMaxSameTypeInTopN,
+} from "../utils/personalization.js";
 
 const ROUTINES_COLLECTION     = "routines";
 const INTERACTIONS_COLLECTION = "interactions";
+
+/** Phase 15: concurrent /recommendations in flight — above this, auto fast mode. */
+const concurrentRecommendationRequests = { count: 0 };
+const HIGH_LOAD_CONCURRENT = parseInt(process.env.RECOMMENDATION_HIGH_LOAD_CONCURRENT || "8", 10);
+/** Recommendation result cache TTL (ms). Default 5 minutes (within 1–5 min spec). */
+const RECOMMENDATION_CACHE_TTL_MS = parseInt(process.env.RECOMMENDATION_CACHE_TTL_MS || "300000", 10);
+/** Places scored per setImmediate chunk (parallel scheduling across event-loop turns). */
+const SCORE_CHUNK_SIZE = parseInt(process.env.RECOMMENDATION_SCORE_CHUNK_SIZE || "8", 10);
 
 // ─── Scoring weights ──────────────────────────────────────────────────────────
 
@@ -125,6 +181,14 @@ const WEIGHTS = Object.freeze({
   shiftLongTermMul:         0.65, // reduce long-term influence when behaviour shifts
   shiftShortTermMul:        1.3,  // amplify recent + session match when behaviour shifts
   learningSignalMaxShare:   0.4,  // max share of combined LT+recent+session positive mass
+  // v14 rules — real-world data signals
+  closedPenalty:           -5,   // penalise places currently closed (isOpen === false)
+  trendBoostMax:            3,   // maximum trend boost (awarded at trendScore = 1.0)
+  // v16 rules — personalization layer
+  multiInterestBoostMax:    4,   // max boost when place.type is a top-weighted interest
+  topInterestBalanceK:      5,   // how many interest types participate in balancing
+  habitContextBoost:        2.5, // per aligned habit (morning gym / weekend social / weekend coffee)
+  contextStackBoostMax:     2,   // compound session + intent + habit/weight alignment
 });
 
 /** Penalise a place if the user has been exposed to it more than this many times. */
@@ -576,6 +640,9 @@ const injectDiversity = (sorted, limit) => {
  * @param {number}             [exploitationWeight=0.4]    — Phase 10 exploitation weight (0-1)
  * @param {Map<string,number>} [recentTypeCounts=Map()]    — Phase 10 type frequency in recent interactions
  * @param {boolean}            [behaviorShiftDetected=false] — Phase 13: recent vs historical divergence
+ * @param {boolean}            [fastMode=false]              — Phase 15: skip embedding + AI model for speed
+ * @param {Map<string,number>} [interestWeights=new Map()]   — Phase 16: normalized multi-interest weights
+ * @param {string[]}           [dominantHabits=[]]           — Phase 16: detected habit labels
  *
  * @returns {{ rawScore: number, breakdown: object }}
  */
@@ -599,7 +666,10 @@ export const scorePlaceForUser = (
   explorationWeight   = EXPLORATION_WEIGHT_NEW,
   exploitationWeight  = EXPLOITATION_WEIGHT_NEW,
   recentTypeCounts    = new Map(),
-  behaviorShiftDetected = false
+  behaviorShiftDetected = false,
+  fastMode            = false,
+  interestWeights     = new Map(),
+  dominantHabits      = []
 ) => {
   const breakdown = {
     // ── v4 fields ─────────────────────────────────────────
@@ -644,6 +714,14 @@ export const scorePlaceForUser = (
     diversityBoost:    0,   // post-sort: boost for underrepresented types in top-N
     // ── v11 fields ────────────────────────────────────────
     modelScore:        0,   // linear model prediction (0 when untrained)
+    // ── v14 fields ────────────────────────────────────────
+    closedPenalty:     0,   // -5 when place.isOpen === false (Google Places data)
+    trendBoost:        0,   // 0–3 when place.trendScore >= 0.5 (trending via Google)
+    // ── v16 fields ────────────────────────────────────────
+    multiInterestBoost:  0,   // top-weighted interests — balanced lift
+    interestWeightUsed:  0,   // weight of this place's type when boosted (debug)
+    habitContextBoost:   0,   // current context matches detected habit + type
+    contextStackBoost:   0,   // compound session + intent + habit/weight
   };
 
   const locationType = resolveLocationType(place);
@@ -804,10 +882,13 @@ export const scorePlaceForUser = (
   // tags align with what the user has consistently engaged with over time.
   // embeddingScore is stored raw (0–1) for transparency; longTermAffinityBoost
   // is its weighted contribution to rawScore (max 8 points).
-  const placeEmbedding            = buildPlaceEmbedding(place);
-  const similarity                = cosineSimilarity(userEmbedding, placeEmbedding);
-  breakdown.embeddingScore        = +similarity.toFixed(4);
-  breakdown.longTermAffinityBoost = +(similarity * WEIGHTS.embeddingWeight).toFixed(3);
+  // Phase 15: skipped in fastMode to reduce per-place CPU time.
+  if (!fastMode) {
+    const placeEmbedding            = buildPlaceEmbedding(place);
+    const similarity                = cosineSimilarity(userEmbedding, placeEmbedding);
+    breakdown.embeddingScore        = +similarity.toFixed(4);
+    breakdown.longTermAffinityBoost = +(similarity * WEIGHTS.embeddingWeight).toFixed(3);
+  }
 
   // ── Rule 22 (v10 NEW): Exploitation boost — reward known preferences ──────────
   // Amplifies places whose type strongly aligns with the user's long-term taste
@@ -866,6 +947,32 @@ export const scorePlaceForUser = (
   breakdown.recentBoost           = +balancedLearn.recent.toFixed(3);
   breakdown.sessionBoost          = +balancedLearn.session.toFixed(3);
 
+  // ── Phase 16: Multi-interest + habits + context stacking ───────────────────
+  const mib = multiInterestBalanceBoost(
+    place.type,
+    interestWeights,
+    WEIGHTS.topInterestBalanceK,
+    WEIGHTS.multiInterestBoostMax
+  );
+  breakdown.multiInterestBoost = mib.boost;
+  breakdown.interestWeightUsed = mib.weightUsed;
+
+  breakdown.habitContextBoost = computeHabitContextBoost(
+    place,
+    context,
+    dominantHabits,
+    WEIGHTS.habitContextBoost
+  );
+
+  breakdown.contextStackBoost = computeContextStackBoost(
+    place,
+    breakdown.sessionIntent,
+    detectedIntent,
+    dominantHabits,
+    interestWeights,
+    WEIGHTS.contextStackBoostMax
+  );
+
   const rawScore =
     breakdown.routineMatch      +
     breakdown.budgetMatch       +
@@ -892,7 +999,10 @@ export const scorePlaceForUser = (
     breakdown.locationTrendScore +
     breakdown.longTermAffinityBoost +
     breakdown.exploitationBoost  +
-    breakdown.repeatPenalty;
+    breakdown.repeatPenalty      +
+    breakdown.multiInterestBoost +
+    breakdown.habitContextBoost  +
+    breakdown.contextStackBoost;
 
   // ── Rule 25 (v12 UPDATED): AI model score ─────────────────────────────────
   // Builds the 10-dimensional feature vector matching Phase 12's
@@ -904,43 +1014,106 @@ export const scorePlaceForUser = (
   //   [3] sessionIntentIndex [4] domSessTypeIndex  [5] embeddingScore
   //   [6] longTermAffinity   [7] typeAffinityNorm  [8] placeInteractNorm
   //   [9] placeRating
-  const AFFINITY_CAP_LOCAL = 50; // mirrors user.service AFFINITY_CAP
-  const rawAffinity        = (profile?.typeAffinity ?? {})[place.type] ?? 0;
+  // Phase 15: skipped entirely in fastMode — model prediction is a non-trivial
+  // matrix multiply per place that adds measurable latency for large catalogues.
+  let blendedRawScore = rawScore;
+  if (!fastMode) {
+    const AFFINITY_CAP_LOCAL = 50; // mirrors user.service AFFINITY_CAP
+    const rawAffinity        = (profile?.typeAffinity ?? {})[place.type] ?? 0;
 
-  const modelFeatures = [
-    // [0] placeTypeIndex
-    encodeType(place.type),
-    // [1] timeOfDayIndex
-    encodeTimeOfDay(context.timeOfDay),
-    // [2] dayOfWeek  (0-6 / 6)
-    new Date().getDay() / 6,
-    // [3] sessionIntentIndex
-    encodeIntent(detectedIntent),
-    // [4] domSessTypeIndex
-    dominantSessionType ? encodeType(dominantSessionType) : 0,
-    // [5] embeddingScore  (already computed in Rule 21)
-    breakdown.embeddingScore,
-    // [6] longTermAffinity  — direct user embedding value for this type
-    (userEmbedding[place.type] ?? 0),
-    // [7] typeAffinityNorm  — map [-50,50] → [0,1]
-    (rawAffinity + AFFINITY_CAP_LOCAL) / (2 * AFFINITY_CAP_LOCAL),
-    // [8] placeInteractNorm — how often user interacted with this place (capped)
-    Math.min(1, (interactionIndex.get(place.id)?.count ?? 0) / 10),
-    // [9] placeRating
-    Math.min(1, (place.rating ?? 0) / 5),
-  ];
+    const modelFeatures = [
+      // [0] placeTypeIndex
+      encodeType(place.type),
+      // [1] timeOfDayIndex
+      encodeTimeOfDay(context.timeOfDay),
+      // [2] dayOfWeek  (0-6 / 6)
+      new Date().getDay() / 6,
+      // [3] sessionIntentIndex
+      encodeIntent(detectedIntent),
+      // [4] domSessTypeIndex
+      dominantSessionType ? encodeType(dominantSessionType) : 0,
+      // [5] embeddingScore  (already computed in Rule 21)
+      breakdown.embeddingScore,
+      // [6] longTermAffinity  — direct user embedding value for this type
+      (userEmbedding[place.type] ?? 0),
+      // [7] typeAffinityNorm  — map [-50,50] → [0,1]
+      (rawAffinity + AFFINITY_CAP_LOCAL) / (2 * AFFINITY_CAP_LOCAL),
+      // [8] placeInteractNorm — how often user interacted with this place (capped)
+      Math.min(1, (interactionIndex.get(place.id)?.count ?? 0) / 10),
+      // [9] placeRating
+      Math.min(1, (place.rating ?? 0) / 5),
+    ];
 
-  const modelOutput = modelPredict(modelFeatures);
-  breakdown.modelScore = +modelOutput.toFixed(4);
+    const modelOutput = modelPredict(modelFeatures);
+    breakdown.modelScore = +modelOutput.toFixed(4);
 
-  // Blend: 0.7 × rule-based + 0.3 × model.  Falls back to rawScore when
-  // the model has not been trained yet (predict returns 0, isModelLoaded false).
-  const blendedRawScore = isModelLoaded()
-    ? WEIGHTS.ruleBlendWeight  * rawScore +
-      WEIGHTS.modelBlendWeight * breakdown.modelScore
-    : rawScore;
+    // Blend: 0.7 × rule-based + 0.3 × model.  Falls back to rawScore when
+    // the model has not been trained yet (predict returns 0, isModelLoaded false).
+    blendedRawScore = isModelLoaded()
+      ? WEIGHTS.ruleBlendWeight  * rawScore +
+        WEIGHTS.modelBlendWeight * breakdown.modelScore
+      : rawScore;
+  }
 
-  return { rawScore: blendedRawScore, breakdown };
+  // ── Rule 26 (v14): Closed place penalty ──────────────────────────────────────
+  // Penalise places that are currently closed according to Google opening hours.
+  // The penalty is only applied when isOpen is explicitly false (not null/undefined),
+  // so Firestore-sourced places without the field are unaffected.
+  if (place.isOpen === false) {
+    breakdown.closedPenalty = WEIGHTS.closedPenalty;
+  }
+
+  // ── Rule 27 (v14): Location trend boost ──────────────────────────────────────
+  // Reward trending places: those with a high trendScore (computed from rating
+  // and review volume by googlePlaces.service.js).  Applied regardless of
+  // cold-start status so popular real-world venues surface for all users.
+  // Threshold: trendScore >= 0.5 (rating ≥ 4.5 with 500+ reviews, or similar combos).
+  if ((place.trendScore ?? 0) >= 0.5) {
+    breakdown.trendBoost = +(WEIGHTS.trendBoostMax * place.trendScore).toFixed(3);
+  }
+
+  return {
+    rawScore: blendedRawScore + breakdown.closedPenalty + breakdown.trendBoost,
+    breakdown,
+  };
+};
+
+// ─── Phase 15: scoring parallelism + derived-signal fingerprint ─────────────
+
+/**
+ * Stable fingerprint for the interaction list (newest-first ordering).
+ * Changes when any interaction is added, removed, or reordered.
+ */
+const buildInteractionFingerprint = (interactions) => {
+  const sorted = [...interactions].sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    return tb - ta;
+  });
+  return `${sorted.length}:${sorted[0]?.id ?? ""}:${sorted[sorted.length - 1]?.id ?? ""}`;
+};
+
+/**
+ * Scores places in chunks scheduled via setImmediate so each chunk yields to the
+ * event loop — improves tail latency under concurrent requests (parallel scoring).
+ */
+const scorePlacesInChunks = async (places, scoreOne) => {
+  const size = Math.max(1, SCORE_CHUNK_SIZE);
+  const chunks = [];
+  for (let i = 0; i < places.length; i += size) {
+    chunks.push(places.slice(i, i + size));
+  }
+  const parts = await Promise.all(
+    chunks.map(
+      (chunk) =>
+        new Promise((resolve) => {
+          setImmediate(() => {
+            resolve(chunk.map((place) => scoreOne(place)));
+          });
+        })
+    )
+  );
+  return parts.flat();
 };
 
 // ─── Main Recommendation Function ────────────────────────────────────────────
@@ -951,6 +1124,13 @@ export const scorePlaceForUser = (
  * @param {string}  userId        — Firebase UID from the verified token
  * @param {boolean} [debug=false] — attach scoreBreakdown to each result
  * @param {number}  [limit=10]    — maximum results to return
+ * @param {{ lat: number, lng: number, radiusMeters?: number }|null} [userLocation=null]
+ *   — Phase 14: when provided, real Google Maps Places data is fetched for the
+ *     given coordinates instead of the static Firestore catalogue.
+ * @param {boolean} [fastMode=false]
+ *   — Phase 15: skip embedding cosine-similarity (Rule 21) and AI model scoring
+ *     (Rule 25) to reduce per-request latency.  Results are cached separately
+ *     from full-mode responses.
  *
  * @returns {Promise<{
  *   recommendations: object[],
@@ -967,18 +1147,78 @@ export const scorePlaceForUser = (
  *
  * @throws {Error} statusCode 404 when no user profile exists
  */
-export const getRecommendations = async (userId, debug = false, limit = 10) => {
-  const context = buildContext();
+export const getRecommendations = async (userId, debug = false, limit = 10, userLocation = null, fastMode = false) => {
+  const startMs = performance.now();
+  concurrentRecommendationRequests.count += 1;
 
-  console.log(`[recommendations] uid=${userId} time=${context.timeOfDay} isWeekend=${context.isWeekend} isLateNight=${context.isLateNight}`);
+  const locationKey = userLocation?.lat != null
+    ? `geo_${Math.round(userLocation.lat * 100) / 100}_${Math.round(userLocation.lng * 100) / 100}_${Math.round((userLocation.radiusMeters ?? 5000) / 1000)}km`
+    : "static";
 
-  const [profile, routines, interactions, places, session] = await Promise.all([
-    getUserById(userId),
-    fetchRoutines(userId),
-    fetchInteractions(userId),
-    getAllPlaces(),
-    getSession(userId),
-  ]);
+  // Phase 15: auto fast mode under load (skip embedding + model — core ranking only).
+  const autoFast =
+    concurrentRecommendationRequests.count > HIGH_LOAD_CONCURRENT ||
+    process.env.RECOMMENDATIONS_HIGH_LOAD === "true";
+  const effectiveFast = fastMode || autoFast;
+
+  const recCacheKey = `rec:${userId}:${effectiveFast ? "fast" : "full"}:${locationKey}`;
+
+  try {
+    // ── Phase 15: Recommendation cache (skip for debug — those carry scoreBreakdown) ─
+    if (!debug) {
+      const cached = recommendationCache.get(recCacheKey);
+      if (cached) {
+        const elapsedMs = Math.round(performance.now() - startMs);
+        console.log(`[recommendations] cache hit uid=${userId} elapsed=${elapsedMs}ms`);
+        return {
+          ...cached,
+          meta: {
+            ...cached.meta,
+            performance: { ...cached.meta.performance, cacheHit: true, elapsedMs },
+          },
+        };
+      }
+    }
+
+    const context = buildContext();
+
+    console.log(
+      `[recommendations] uid=${userId} time=${context.timeOfDay} isWeekend=${context.isWeekend} ` +
+      `isLateNight=${context.isLateNight} fastMode=${effectiveFast} autoLoad=${autoFast}`
+    );
+
+  // ── Phase 15: Profile data cache ─────────────────────────────────────────────
+  // Caches { profile, routines, interactions, session } per user for 30 s.
+  // Avoids 4 Firestore round-trips for repeated requests within that window.
+  // The cache is invalidated by interaction.service.js on every new interaction.
+  const pdKey    = `pd:${userId}`;
+  const pdBundle = profileDataCache.get(pdKey);
+
+  let profile, routines, interactions, session;
+
+  if (pdBundle) {
+    console.log(`[recommendations] profileData cache hit uid=${userId}`);
+    ({ profile, routines, interactions, session } = pdBundle);
+  } else {
+    [profile, routines, interactions, session] = await Promise.all([
+      getUserById(userId),
+      fetchRoutines(userId),
+      fetchInteractions(userId),
+      getSession(userId),
+    ]);
+    // Only cache after we know the profile exists (null profiles are never stored).
+    if (profile) {
+      profileDataCache.set(pdKey, { profile, routines, interactions, session });
+    }
+  }
+
+  // Places are always fetched separately because they may be location-dependent
+  // (Google Maps) and already carry their own cache inside place.service.js /
+  // googlePlaces.service.js.
+  const places = await getAllPlaces(
+    userLocation?.lat != null ? { lat: userLocation.lat, lng: userLocation.lng } : null,
+    userLocation?.radiusMeters ?? 5000
+  );
 
   if (!profile) {
     const err = new Error("User profile not found");
@@ -989,12 +1229,48 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
   const now = new Date();
 
   // Build lookup structures.
-  const placeLookup        = buildPlaceLookupMap(places);
-  const affinityMap        = buildTypeAffinityMap(interactions, placeLookup);
-  const { savedIds, dismissedIds } = buildStrongSignalSets(interactions, placeLookup);
-  const topInterestType    = deriveTopInterestType(affinityMap);
-  const interactionIndex   = buildInteractionIndex(interactions, placeLookup, now);
-  const seenCountMap       = buildSeenCountMap(profile.seenPlaces ?? []);
+  const placeLookup = buildPlaceLookupMap(places);
+
+  // ── Phase 15: Precomputed affinity / index maps (derivedSignalsCache) ─────────
+  const nowMinuteBucket = Math.floor(Date.now() / 60000);
+  const interactionFingerprint = buildInteractionFingerprint(interactions);
+  const dsKey = `ds:${userId}:${locationKey}:${interactionFingerprint}:${nowMinuteBucket}`;
+
+  let affinityMap;
+  let savedIds;
+  let dismissedIds;
+  let interactionIndex;
+  let seenCountMap;
+  let topInterestType;
+
+  const derivedHit = derivedSignalsCache.get(dsKey);
+  if (derivedHit) {
+    ({
+      affinityMap,
+      savedIds,
+      dismissedIds,
+      interactionIndex,
+      seenCountMap,
+      topInterestType,
+    } = derivedHit);
+    console.log(`[recommendations] derivedSignals cache hit uid=${userId}`);
+  } else {
+    affinityMap = buildTypeAffinityMap(interactions, placeLookup);
+    const strong = buildStrongSignalSets(interactions, placeLookup);
+    savedIds     = strong.savedIds;
+    dismissedIds = strong.dismissedIds;
+    interactionIndex = buildInteractionIndex(interactions, placeLookup, now);
+    seenCountMap       = buildSeenCountMap(profile.seenPlaces ?? []);
+    topInterestType    = deriveTopInterestType(affinityMap);
+    derivedSignalsCache.set(dsKey, {
+      affinityMap,
+      savedIds,
+      dismissedIds,
+      interactionIndex,
+      seenCountMap,
+      topInterestType,
+    });
+  }
 
   // ── v7: Short-term memory window (newest-first, capped at RECENT_INTERACTIONS_WINDOW) ──
   const recentInteractions = interactions
@@ -1050,6 +1326,16 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
   // Count per-type frequency in the recent window for Rule 23 + Rule 24.
   const recentTypeCounts = buildRecentTypeCounts(recentInteractions, placeLookup);
 
+  // ── v16: Interest weights + habit detection (per request) ────────────────────
+  const resolvePid = (placeId) => resolvePlace(placeLookup, placeId);
+  const { weights: interestWeights } = buildTopInterestWeights(
+    profile,
+    recentInteractions,
+    now,
+    resolvePid
+  );
+  const { habits: dominantHabits } = detectDominantHabits(interactions, now, resolvePid);
+
   console.log(
     `[recommendations] longTermIntent=${longTermIntent} sessionIntent=${sessionIntent}` +
     ` effectiveIntent=${detectedIntent} dominantSessionType=${dominantSessionType ?? "none"}` +
@@ -1057,15 +1343,17 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
     ` explorationW=${explorationWeight} exploitationW=${exploitationWeight}`
   );
 
-  // ── Phase 1: Score every catalogue place ──────────────────────────────────────
-  const scored = places.map((place) => {
+  // ── Phase 1: Score every catalogue place (chunked async for parallel scheduling) ─
+  const scoreOne = (place) => {
     const { rawScore, breakdown } = scorePlaceForUser(
       place, profile, routines, interactions,
       affinityMap, placeLookup, context, interactionIndex, seenCountMap,
       detectedIntent, recentAffinityMap, dominantTypes,
       dominantSessionType, lastSessionType, isColdStart,
       userEmbedding, explorationWeight, exploitationWeight, recentTypeCounts,
-      behaviorShiftDetected
+      behaviorShiftDetected, effectiveFast,
+      interestWeights,
+      dominantHabits
     );
 
     const normalizedScore = normalizeScore(rawScore);
@@ -1081,7 +1369,9 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
     if (debug) entry.scoreBreakdown = breakdown;
 
     return entry;
-  });
+  };
+
+  const scored = await scorePlacesInChunks(places, scoreOne);
 
   // ── Phase 2: Filter out dismissed places ─────────────────────────────────────
   const withoutDismissed = scored.filter((p) => !dismissedIds.has(p.id));
@@ -1166,6 +1456,9 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
   // Final order must match score.
   recommendations.sort((a, b) => b.score - a.score);
 
+  // ── v16: Hard cap — max 2 of the same type in top 5 ───────────────────────────
+  enforceMaxSameTypeInTopN(recommendations, withoutDismissed, 5, 2);
+
   const meta = {
     profileFound:      true,
     routineCount:      routines.length,
@@ -1200,10 +1493,48 @@ export const getRecommendations = async (userId, debug = false, limit = 10) => {
       recencyWeightActive:   true,
       behaviorShiftDetected,
     },
+    location: {
+      source:         (userLocation?.lat != null && process.env.GOOGLE_MAPS_API_KEY)
+                        ? "google_maps"
+                        : "firestore",
+      radiusUsed:     userLocation?.radiusMeters ?? null,
+      resultsFetched: places.length,
+    },
+    personalization: {
+      dominantHabits,
+      topInterestWeights: topWeightsForMeta(interestWeights, 5),
+    },
   };
   if (debug) {
     meta.context = context;
   }
 
-  return { recommendations, context, meta };
+  // ── Phase 15: Timing + result caching ────────────────────────────────────────
+  const elapsedMs = Math.round(performance.now() - startMs);
+
+  if (elapsedMs > 300) {
+    console.warn(`[recommendations] SLOW uid=${userId} elapsed=${elapsedMs}ms fallback=${effectiveFast}`);
+  } else {
+    console.log(`[recommendations] uid=${userId} elapsed=${elapsedMs}ms cacheHit=false`);
+  }
+
+  meta.performance = {
+    elapsedMs,
+    cacheHit:          false,
+    fallbackActive:    effectiveFast,
+    heavyLoadFallback: autoFast && !fastMode,
+    placesScored:      places.length,
+  };
+
+  const result = { recommendations, context, meta };
+
+  // Cache full-mode and fast-mode results separately; never cache debug responses.
+  if (!debug) {
+    recommendationCache.set(recCacheKey, result, RECOMMENDATION_CACHE_TTL_MS);
+  }
+
+  return result;
+  } finally {
+    concurrentRecommendationRequests.count -= 1;
+  }
 };

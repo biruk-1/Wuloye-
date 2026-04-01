@@ -81,6 +81,21 @@ docker-compose up --build
 
 ---
 
+## Phase 15 — Performance (optional)
+
+These tune caching and load behaviour. Defaults work without setting any of them.
+
+| Variable | Purpose |
+|----------|---------|
+| `RECOMMENDATION_CACHE_TTL_MS` | How long full recommendation responses are cached (default `300000` = 5 minutes). |
+| `RECOMMENDATION_HIGH_LOAD_CONCURRENT` | When more than this many `/recommendations` requests run at once, the engine switches to fast mode (skips embedding + AI model). Default `8`. |
+| `RECOMMENDATIONS_HIGH_LOAD` | Set to `true` to always use fast mode (useful under sustained load). |
+| `RECOMMENDATION_SCORE_CHUNK_SIZE` | Chunk size for parallel scoring via `setImmediate` (default `8`). |
+
+Caching is **in-memory** (`src/utils/cache.js`). For multiple server instances, add Redis or another shared store and replace the `TtlCache` backing map, or accept per-instance caches.
+
+---
+
 ## Summary
 
 | What you have | Used for |

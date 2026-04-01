@@ -7,6 +7,7 @@
 
 import {
   createInteraction,
+  createInteractionsBatch,
   getInteractionsByUser,
   ACTION_SCORES,
 } from "../services/interaction.service.js";
@@ -80,6 +81,34 @@ export const logInteractionHandler = async (req, res, next) => {
       message: "Interaction logged successfully",
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/interactions/batch
+ *
+ * Phase 15: batch Firestore writes for multiple interactions in one round-trip.
+ * Body: { items: [{ placeId, actionType, metadata? }, ...] } — max 500 items.
+ *
+ * @type {import("express").RequestHandler}
+ */
+export const logInteractionsBatchHandler = async (req, res, next) => {
+  try {
+    const { items } = req.body;
+    if (!Array.isArray(items)) {
+      return next(createError("body.items must be an array", 400));
+    }
+
+    const interactions = await createInteractionsBatch(req.user.uid, items);
+
+    return res.status(201).json({
+      success: true,
+      data:    interactions,
+      message: `${interactions.length} interaction(s) logged successfully (batch)`,
+    });
+  } catch (error) {
+    if (error.statusCode) return next(error);
     next(error);
   }
 };

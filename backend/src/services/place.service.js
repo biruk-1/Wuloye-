@@ -7,6 +7,13 @@
  *      not hit Firestore on every call.
  *   3. Expose seedPlacesIfEmpty() used by the dev seed endpoint.
  *
+ * Phase 14 addition:
+ *   getAllPlaces() now accepts an optional userLocation argument.  When a
+ *   location is provided AND GOOGLE_MAPS_API_KEY is set, real nearby places
+ *   from the Google Maps Places API are returned instead of the static
+ *   Firestore catalogue.  If Google returns 0 results or the key is absent,
+ *   the function transparently falls back to Firestore data.
+ *
  * Place document structure:
  *   id              {string}   — Firestore document ID (stored inside doc)
  *   name            {string}   — display name
@@ -19,13 +26,19 @@
  *   popularityScore {number}   — static baseline score for cold-start ranking
  *   isIndoor        {boolean}
  *   createdAt       {string}   — ISO 8601 timestamp
+ *   // Phase 14 additions (Google Places only):
+ *   isOpen          {boolean|null} — opening_hours.open_now
+ *   trendScore      {number}       — 0–1 trending signal (high rating × volume)
+ *   userRatingsTotal {number}      — raw Google review count
+ *   source          {string}       — "google_maps" | undefined
  *
  * Validation constants (shared with the seed script and controller):
  *   VALID_TYPES      — allowed type values
  *   VALID_PRICE_RANGES — allowed priceRange values
  */
 
-import { db } from "../config/firebase.js";
+import { db }              from "../config/firebase.js";
+import { getNearbyPlaces } from "./googlePlaces.service.js";
 
 export const PLACES_COLLECTION = "places";
 
@@ -77,11 +90,35 @@ export const invalidateCache = () => {
 // ─── Core read helpers ────────────────────────────────────────────────────────
 
 /**
- * Returns all places from Firestore, using the in-process cache when available.
+ * Returns all places, preferring real Google Maps data when available.
  *
+ * Phase 14 behaviour:
+ *   - When `userLocation` is provided AND `GOOGLE_MAPS_API_KEY` is set, the
+ *     function calls the Google Maps Places API (via googlePlaces.service.js)
+ *     and returns the live nearby results.
+ *   - If Google returns 0 results, the key is absent, or any error occurs,
+ *     the function falls back to the Firestore catalogue transparently.
+ *   - When `userLocation` is omitted (all existing callers), the original
+ *     Firestore path is used unchanged.
+ *
+ * @param {{ lat: number, lng: number }|null} [userLocation=null]
+ *   User's current coordinates.  Pass null (or omit) to use Firestore.
+ * @param {number} [radiusMeters=5000]
+ *   Search radius passed to the Google Places Nearby Search API.
  * @returns {Promise<object[]>} Array of place documents (may be empty)
  */
-export const getAllPlaces = async () => {
+export const getAllPlaces = async (userLocation = null, radiusMeters = 5000) => {
+  // ── Phase 14: Google Maps live data path ─────────────────────────────────────
+  if (userLocation?.lat != null && process.env.GOOGLE_MAPS_API_KEY) {
+    const googlePlaces = await getNearbyPlaces(userLocation, radiusMeters);
+    if (googlePlaces.length > 0) {
+      console.log(`[places] Using ${googlePlaces.length} Google Maps place(s)`);
+      return googlePlaces;
+    }
+    console.log("[places] Google returned 0 results — falling back to Firestore");
+  }
+
+  // ── Firestore path (original behaviour) ──────────────────────────────────────
   if (isCacheValid()) {
     console.log(`[places] Cache hit — returning ${_cache.length} place(s)`);
     return _cache;

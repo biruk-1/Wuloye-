@@ -28,6 +28,11 @@ import { getAllPlaces }            from "./place.service.js";
 import { SEED_PLACES }             from "../data/places.seed.js";
 import { updateSession }           from "./session.service.js";
 import { maybeRetrain }            from "../jobs/retrainModel.js";
+import {
+  recommendationCache,
+  profileDataCache,
+  derivedSignalsCache,
+} from "../utils/cache.js";
 
 const INTERACTIONS_COLLECTION = "interactions";
 
@@ -119,7 +124,89 @@ export const createInteraction = async (userId, placeId, actionType, metadata = 
     console.warn(`[interaction] retrainModel check failed: ${err.message}`)
   );
 
+  // ── Phase 15: Cache invalidation ─────────────────────────────────────────────
+  // Flush this user's recommendation cache so the very next request sees their
+  // new interaction reflected immediately.  The profile data bundle is also
+  // invalidated so updated affinity, embedding and session data is re-fetched.
+  recommendationCache.deleteByPrefix(`rec:${userId}:`);
+  profileDataCache.delete(`pd:${userId}`);
+  derivedSignalsCache.deleteByPrefix(`ds:${userId}:`);
+  console.log(`[interaction] caches invalidated for uid=${userId}`);
+
   return interaction;
+};
+
+/**
+ * Phase 15: Persist multiple interaction documents in a single Firestore batch write,
+ * then apply intelligence + session updates sequentially (same user doc — avoids races).
+ *
+ * @param {string} userId
+ * @param {{ placeId: string, actionType: string, metadata?: object|null }[]} items
+ * @returns {Promise<object[]>} saved interaction documents in order
+ */
+export const createInteractionsBatch = async (userId, items) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    const err = new Error("items must be a non-empty array");
+    err.statusCode = 400;
+    throw err;
+  }
+  if (items.length > 500) {
+    const err = new Error("Maximum 500 interactions per batch (Firestore batch limit)");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const writeBatch = db.batch();
+  const results = [];
+
+  for (const item of items) {
+    const { placeId, actionType, metadata } = item;
+    if (!placeId || typeof placeId !== "string") {
+      const err = new Error("Each item requires a non-empty placeId string");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!actionType || !ACTION_SCORES[actionType]) {
+      const err = new Error(`Invalid actionType "${actionType}" in batch item`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const docRef = db.collection(INTERACTIONS_COLLECTION).doc();
+    const interaction = {
+      id:        docRef.id,
+      userId,
+      placeId:   placeId.trim(),
+      actionType,
+      score:     ACTION_SCORES[actionType],
+      metadata:  metadata ?? null,
+      createdAt: new Date().toISOString(),
+    };
+    writeBatch.set(docRef, interaction);
+    results.push(interaction);
+  }
+
+  await writeBatch.commit();
+
+  for (const interaction of results) {
+    const { catalogueId, type } = await resolvePlaceInfo(interaction.placeId);
+    const effectivePlaceId = catalogueId ?? interaction.placeId;
+    await Promise.all([
+      updateUserIntelligence(userId, type, effectivePlaceId, interaction.actionType),
+      updateSession(userId, { placeId: effectivePlaceId, type, actionType: interaction.actionType }),
+    ]);
+  }
+
+  maybeRetrain().catch((err) =>
+    console.warn(`[interaction] retrainModel check failed: ${err.message}`)
+  );
+
+  recommendationCache.deleteByPrefix(`rec:${userId}:`);
+  profileDataCache.delete(`pd:${userId}`);
+  derivedSignalsCache.deleteByPrefix(`ds:${userId}:`);
+  console.log(`[interaction] batch (${results.length}) caches invalidated for uid=${userId}`);
+
+  return results;
 };
 
 /**
