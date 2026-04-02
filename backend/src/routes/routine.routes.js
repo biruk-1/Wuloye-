@@ -23,6 +23,7 @@ import {
   updateRoutineHandler,
   deleteRoutineHandler,
 } from "../controllers/routine.controller.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
@@ -33,13 +34,13 @@ const router = Router();
  * Create a new routine for the authenticated user.
  * Body: { weekday, timeOfDay, activityType, locationPreference, budgetRange }
  */
-router.post("/", authenticate, createRoutineHandler);
+router.post("/", authLimiter, authenticate, createRoutineHandler);
 
 /**
  * GET /api/routines
  * Return all routines owned by the authenticated user, sorted newest first.
  */
-router.get("/", authenticate, getRoutinesHandler);
+router.get("/", authLimiter, authenticate, getRoutinesHandler);
 
 // ─── Document routes (/api/routines/:id) ─────────────────────────────────────
 
@@ -47,19 +48,19 @@ router.get("/", authenticate, getRoutinesHandler);
  * GET /api/routines/:id
  * Return a single routine. 404 if missing, 403 if not the owner.
  */
-router.get("/:id", authenticate, getRoutineHandler);
+router.get("/:id", authLimiter, authenticate, getRoutineHandler);
 
 /**
  * PUT /api/routines/:id
  * Update mutable fields of a routine. 404 if missing, 403 if not the owner.
  * Allowed body fields: weekday, timeOfDay, activityType, locationPreference, budgetRange
  */
-router.put("/:id", authenticate, updateRoutineHandler);
+router.put("/:id", authLimiter, authenticate, updateRoutineHandler);
 
 /**
  * DELETE /api/routines/:id
  * Permanently delete a routine. 404 if missing, 403 if not the owner.
  */
-router.delete("/:id", authenticate, deleteRoutineHandler);
+router.delete("/:id", authLimiter, authenticate, deleteRoutineHandler);
 
 export default router;

@@ -31,6 +31,7 @@ import {
   saveModel,
   loadModel,
 }                                      from "../services/ai/modelService.js";
+import { logger }                       from "../utils/logger.js";
 
 const INTERACTIONS_COLLECTION = "interactions";
 
@@ -85,11 +86,11 @@ const nextVersion = () => {
  * @param {number} totalCount — for logging
  */
 const runTrainingPipeline = async (totalCount) => {
-  console.log(`[retrain] starting pipeline (${totalCount} total interactions)`);
+  logger.info(`[retrain] starting pipeline (${totalCount} total interactions)`);
 
   const rawDataset = await buildTrainingData();
   if (rawDataset.length < 5) {
-    console.warn(`[retrain] only ${rawDataset.length} usable samples — skipping (need >= 5)`);
+    logger.warn(`[retrain] only ${rawDataset.length} usable samples — skipping (need >= 5)`);
     return;
   }
 
@@ -112,9 +113,9 @@ const runTrainingPipeline = async (totalCount) => {
 
   await saveModel(model);   // writes Firestore + file backup, updates cache
 
-  console.log(`[retrain] Model trained on ${rawDataset.length} samples`);
+  logger.info(`[retrain] Model trained on ${rawDataset.length} samples`);
 
-  console.log(
+  logger.info(
     `[retrain] complete — ${version} | samples=${rawDataset.length} ` +
     `loss=${model.finalLoss} ` +
     `weights=[${weights.map((w) => w.toFixed(4)).join(", ")}]`
@@ -147,6 +148,6 @@ export const maybeRetrain = async () => {
 
     await runTrainingPipeline(totalCount);
   } catch (err) {
-    console.warn(`[retrain] pipeline error: ${err.message}`);
+    logger.warn(`[retrain] pipeline error: ${err.message}`);
   }
 };

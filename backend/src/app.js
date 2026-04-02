@@ -16,16 +16,33 @@ import recommendationRouter from "./routes/recommendation.routes.js";
 import devRouter from "./routes/dev.routes.js";
 import { notFoundHandler, errorHandler } from "./middleware/errorHandler.js";
 import { initModelCache } from "./services/ai/modelService.js";
+import { logger } from "./utils/logger.js";
+import { requestLogger } from "./middleware/requestLogger.js";
+import { globalLimiter } from "./middleware/rateLimiter.js";
+import helmet from "helmet";
+import { metricsMiddleware } from "./middleware/metrics.js";
 
 const app = express();
 
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
-// Parse incoming JSON request bodies
-app.use(express.json());
+// Security HTTP headers — Phase 18
+app.use(helmet());
+
+// HTTP request logging (morgan → winston) — Phase 18
+app.use(requestLogger);
+
+// Global rate limiter (300 req / 15 min per IP) — Phase 18
+app.use(globalLimiter);
+
+// In-process metrics counters — Phase 18
+app.use(metricsMiddleware);
+
+// Parse incoming JSON request bodies (50 kb cap prevents megabyte JSON DoS)
+app.use(express.json({ limit: "50kb" }));
 
 // Parse URL-encoded bodies (form submissions)
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "50kb" }));
 
 // CORS — origins are controlled via the ALLOWED_ORIGINS environment variable
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -64,7 +81,7 @@ app.use("/api/recommendations", recommendationRouter);
 // Dev routes — seeding and inspection tools, only active outside production
 if (process.env.NODE_ENV !== "production") {
   app.use("/api/dev", devRouter);
-  console.log("[app] Dev routes mounted at /api/dev (NODE_ENV:", process.env.NODE_ENV ?? "development", ")");
+  logger.info("[app] Dev routes mounted at /api/dev (NODE_ENV:", process.env.NODE_ENV ?? "development", ")");
 }
 
 // ─── Error Handlers (must be registered last) ────────────────────────────────
@@ -77,7 +94,7 @@ app.use(errorHandler);
 // cache so the first recommendation request is not delayed by a cold read.
 // Non-fatal: failure only means the model stays in its untrained default state.
 initModelCache().catch((err) =>
-  console.warn(`[app] AI model init failed: ${err.message} — will use rule-based scoring only`)
+  logger.warn(`[app] AI model init failed: ${err.message} — will use rule-based scoring only`)
 );
 
 export default app;

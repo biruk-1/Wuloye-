@@ -1,5 +1,8 @@
 /**
- * recommendation.service.js — Personalized recommendation engine (v16).
+ * recommendation.service.js — Personalized recommendation engine (v17).
+ *
+ * v17 change: A/B experiment — deterministic variant A/B, blend weights, meta.experiment,
+ *   cache key includes variant when EXPERIMENT_ACTIVE=true (see utils/experiment.js).
  *
  * v16 change: advanced personalization layer.
  *   - buildTopInterestWeights: recency + decay + typeAffinity + declared interests →
@@ -119,6 +122,13 @@ import {
   topWeightsForMeta,
   enforceMaxSameTypeInTopN,
 } from "../utils/personalization.js";
+import {
+  isExperimentActive,
+  getVariantForUser,
+  getBlendWeightsForVariant,
+  EXPERIMENT_ID,
+} from "../utils/experiment.js";
+import { logger } from "../utils/logger.js";
 
 const ROUTINES_COLLECTION     = "routines";
 const INTERACTIONS_COLLECTION = "interactions";
@@ -643,6 +653,8 @@ const injectDiversity = (sorted, limit) => {
  * @param {boolean}            [fastMode=false]              — Phase 15: skip embedding + AI model for speed
  * @param {Map<string,number>} [interestWeights=new Map()]   — Phase 16: normalized multi-interest weights
  * @param {string[]}           [dominantHabits=[]]           — Phase 16: detected habit labels
+ * @param {number}             [ruleBlendWeight]            — Phase 17: rule/model blend (default WEIGHTS)
+ * @param {number}             [modelBlendWeight]           — Phase 17: rule/model blend (default WEIGHTS)
  *
  * @returns {{ rawScore: number, breakdown: object }}
  */
@@ -669,7 +681,9 @@ export const scorePlaceForUser = (
   behaviorShiftDetected = false,
   fastMode            = false,
   interestWeights     = new Map(),
-  dominantHabits      = []
+  dominantHabits      = [],
+  ruleBlendWeight     = WEIGHTS.ruleBlendWeight,
+  modelBlendWeight    = WEIGHTS.modelBlendWeight
 ) => {
   const breakdown = {
     // ── v4 fields ─────────────────────────────────────────
@@ -1050,8 +1064,8 @@ export const scorePlaceForUser = (
     // Blend: 0.7 × rule-based + 0.3 × model.  Falls back to rawScore when
     // the model has not been trained yet (predict returns 0, isModelLoaded false).
     blendedRawScore = isModelLoaded()
-      ? WEIGHTS.ruleBlendWeight  * rawScore +
-        WEIGHTS.modelBlendWeight * breakdown.modelScore
+      ? ruleBlendWeight  * rawScore +
+        modelBlendWeight * breakdown.modelScore
       : rawScore;
   }
 
@@ -1161,7 +1175,15 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
     process.env.RECOMMENDATIONS_HIGH_LOAD === "true";
   const effectiveFast = fastMode || autoFast;
 
-  const recCacheKey = `rec:${userId}:${effectiveFast ? "fast" : "full"}:${locationKey}`;
+  const experimentActive   = isExperimentActive();
+  const experimentVariant  = experimentActive ? getVariantForUser(userId) : null;
+  const blendWeights       = experimentActive
+    ? getBlendWeightsForVariant(experimentVariant)
+    : { ruleBlendWeight: WEIGHTS.ruleBlendWeight, modelBlendWeight: WEIGHTS.modelBlendWeight };
+
+  const recCacheKey = `rec:${userId}:${effectiveFast ? "fast" : "full"}:${locationKey}:${
+    experimentActive ? experimentVariant : "off"
+  }`;
 
   try {
     // ── Phase 15: Recommendation cache (skip for debug — those carry scoreBreakdown) ─
@@ -1169,7 +1191,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
       const cached = recommendationCache.get(recCacheKey);
       if (cached) {
         const elapsedMs = Math.round(performance.now() - startMs);
-        console.log(`[recommendations] cache hit uid=${userId} elapsed=${elapsedMs}ms`);
+        logger.debug(`[recommendations] cache hit uid=${userId} elapsed=${elapsedMs}ms`);
         return {
           ...cached,
           meta: {
@@ -1182,7 +1204,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
 
     const context = buildContext();
 
-    console.log(
+    logger.info(
       `[recommendations] uid=${userId} time=${context.timeOfDay} isWeekend=${context.isWeekend} ` +
       `isLateNight=${context.isLateNight} fastMode=${effectiveFast} autoLoad=${autoFast}`
     );
@@ -1197,7 +1219,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
   let profile, routines, interactions, session;
 
   if (pdBundle) {
-    console.log(`[recommendations] profileData cache hit uid=${userId}`);
+    logger.debug(`[recommendations] profileData cache hit uid=${userId}`);
     ({ profile, routines, interactions, session } = pdBundle);
   } else {
     [profile, routines, interactions, session] = await Promise.all([
@@ -1253,7 +1275,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
       seenCountMap,
       topInterestType,
     } = derivedHit);
-    console.log(`[recommendations] derivedSignals cache hit uid=${userId}`);
+    logger.debug(`[recommendations] derivedSignals cache hit uid=${userId}`);
   } else {
     affinityMap = buildTypeAffinityMap(interactions, placeLookup);
     const strong = buildStrongSignalSets(interactions, placeLookup);
@@ -1290,7 +1312,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
   // ── v13: behaviour shift (last 10 vs historical mean action score) ───────────
   const { behaviorShiftDetected, recentAvg, historicalAvg } = detectBehaviorShift(interactions);
   if (behaviorShiftDetected) {
-    console.log(
+    logger.info(
       `[recommendations] behaviorShift detected recentAvg=${recentAvg.toFixed(3)} ` +
       `historicalAvg=${historicalAvg.toFixed(3)} — down-weighting long-term, boosting recent/session`
     );
@@ -1336,7 +1358,7 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
   );
   const { habits: dominantHabits } = detectDominantHabits(interactions, now, resolvePid);
 
-  console.log(
+  logger.info(
     `[recommendations] longTermIntent=${longTermIntent} sessionIntent=${sessionIntent}` +
     ` effectiveIntent=${detectedIntent} dominantSessionType=${dominantSessionType ?? "none"}` +
     ` lastSessionType=${lastSessionType ?? "none"} isColdStart=${isColdStart}` +
@@ -1353,7 +1375,9 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
       userEmbedding, explorationWeight, exploitationWeight, recentTypeCounts,
       behaviorShiftDetected, effectiveFast,
       interestWeights,
-      dominantHabits
+      dominantHabits,
+      blendWeights.ruleBlendWeight,
+      blendWeights.modelBlendWeight
     );
 
     const normalizedScore = normalizeScore(rawScore);
@@ -1504,6 +1528,17 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
       dominantHabits,
       topInterestWeights: topWeightsForMeta(interestWeights, 5),
     },
+    experiment: experimentActive
+      ? {
+          experimentActive: true,
+          experimentId:     EXPERIMENT_ID,
+          variantAssigned:  experimentVariant,
+        }
+      : {
+          experimentActive: false,
+          experimentId:     null,
+          variantAssigned:  null,
+        },
   };
   if (debug) {
     meta.context = context;
@@ -1513,9 +1548,9 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
   const elapsedMs = Math.round(performance.now() - startMs);
 
   if (elapsedMs > 300) {
-    console.warn(`[recommendations] SLOW uid=${userId} elapsed=${elapsedMs}ms fallback=${effectiveFast}`);
+    logger.warn(`[recommendations] SLOW uid=${userId} elapsed=${elapsedMs}ms fallback=${effectiveFast}`);
   } else {
-    console.log(`[recommendations] uid=${userId} elapsed=${elapsedMs}ms cacheHit=false`);
+    logger.info(`[recommendations] uid=${userId} elapsed=${elapsedMs}ms cacheHit=false`);
   }
 
   meta.performance = {
@@ -1534,6 +1569,33 @@ export const getRecommendations = async (userId, debug = false, limit = 10, user
   }
 
   return result;
+  } catch (err) {
+    // Phase 18: safety catch — log with context, re-throw as clean 500.
+    // Optionally return a minimal seed-based fallback when profile was resolved.
+    logger.error("[recommendations] getRecommendations failed", {
+      uid:     userId,
+      message: err.message,
+      stack:   err.stack,
+    });
+
+    if (process.env.RECOMMENDATION_FALLBACK_ENABLED === "true") {
+      // Return the first few seed places as a minimal safe response.
+      const fallback = SEED_PLACES.slice(0, 5).map((p) => ({
+        ...p,
+        score: 0,
+        meta: { fallback: true },
+      }));
+      logger.warn(`[recommendations] returning fallback list (${fallback.length} seeds) for uid=${userId}`);
+      return {
+        recommendations: fallback,
+        context:         {},
+        meta:            { fallback: true, error: "Recommendation engine temporarily unavailable" },
+      };
+    }
+
+    const safeErr = new Error("Recommendation engine temporarily unavailable");
+    safeErr.statusCode = 500;
+    throw safeErr;
   } finally {
     concurrentRecommendationRequests.count -= 1;
   }

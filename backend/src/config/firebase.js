@@ -9,6 +9,7 @@
  */
 
 import admin from "firebase-admin";
+import { logger } from "../utils/logger.js";
 
 // Guard against accidental double-initialisation (e.g. during hot-reload)
 if (!admin.apps.length) {
@@ -35,7 +36,7 @@ if (!admin.apps.length) {
     }),
   });
 
-  console.log("[firebase] Admin SDK initialised successfully");
+  logger.info("[firebase] Admin SDK initialised successfully");
 }
 
 // Firestore database instance

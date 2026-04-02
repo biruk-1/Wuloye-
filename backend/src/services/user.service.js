@@ -26,6 +26,7 @@
 
 import { db } from "../config/firebase.js";
 import { normalizeEmbedding } from "../utils/embedding.js";
+import { logger } from "../utils/logger.js";
 
 /** Firestore collection name — single source of truth */
 const USERS_COLLECTION = "users";
@@ -248,12 +249,12 @@ export const updateUserIntelligence = async (uid, placeType, placeId, actionType
       updatedAt:  new Date().toISOString(),
     });
 
-    console.log(
+    logger.info(
       `[intelligence] uid=${uid} type=${placeType}` +
       ` affinity=${currentValue}->${newValue}` +
       ` embed=${prevTypeValue.toFixed(3)}->${nextTypeValue.toFixed(3)}`
     );
   } catch (err) {
-    console.warn(`[intelligence] Failed to update intelligence for uid=${uid}:`, err.message);
+    logger.warn(`[intelligence] Failed to update intelligence for uid=${uid}:`, { error: err.message });
   }
 };

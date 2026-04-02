@@ -12,6 +12,8 @@
  *   { success: false, data: null, message: string }
  */
 
+import { logger } from "../utils/logger.js";
+
 /**
  * 404 — Route not found
  * @type {import("express").RequestHandler}
@@ -44,10 +46,9 @@ export const errorHandler = (err, req, res, _next) => {
 
   // Log the full error in non-production environments for easier debugging
   if (process.env.NODE_ENV !== "production") {
-    console.error(`[error] ${req.method} ${req.originalUrl}`, err);
+    logger.error(`[error] ${req.method} ${req.originalUrl}`, { err });
   } else {
-    // In production only log the message to avoid leaking stack traces to logs
-    console.error(`[error] ${req.method} ${req.originalUrl} — ${err.message}`);
+    logger.error(`[error] ${req.method} ${req.originalUrl} — ${err.message}`);
   }
 
   res.status(statusCode).json({

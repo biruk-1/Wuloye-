@@ -36,6 +36,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { fileURLToPath }                                       from "url";
 import { dirname, join }                                       from "path";
 import { db }                                                  from "../../config/firebase.js";
+import { logger }                                              from "../../utils/logger.js";
 
 // ─── File path (backup) ───────────────────────────────────────────────────────
 
@@ -89,7 +90,7 @@ const saveModelToFile = (model) => {
     if (!existsSync(MODEL_DIR)) mkdirSync(MODEL_DIR, { recursive: true });
     writeFileSync(MODEL_PATH, JSON.stringify(model, null, 2), "utf8");
   } catch (err) {
-    console.warn(`[modelService] file backup failed: ${err.message}`);
+    logger.warn(`[modelService] file backup failed: ${err.message}`);
   }
 };
 
@@ -108,21 +109,21 @@ export const initModelCache = async () => {
     const snap = await db.collection(MODELS_COLLECTION).doc(CURRENT_MODEL_DOCID).get();
     if (snap.exists && isModelTrained(snap.data())) {
       _cached = snap.data();
-      console.log(
+      logger.info(
         `[modelService] init — loaded ${_cached.version} from Firestore ` +
         `(${_cached.sampleCount} samples, trained ${_cached.trainedAt})`
       );
       return;
     }
   } catch (err) {
-    console.warn(`[modelService] Firestore init failed: ${err.message} — trying file backup`);
+    logger.warn(`[modelService] Firestore init failed: ${err.message} — trying file backup`);
   }
 
   // Fall back to file.
   const fileModel = loadModelFromFile();
   if (fileModel && isModelTrained(fileModel)) {
     _cached = fileModel;
-    console.log(
+    logger.info(
       `[modelService] init — loaded ${_cached.version} from file backup ` +
       `(${_cached.sampleCount} samples)`
     );
@@ -131,7 +132,7 @@ export const initModelCache = async () => {
 
   // No trained model anywhere — use defaults (model will be trained on first trigger).
   _cached = { ...DEFAULT_MODEL };
-  console.log("[modelService] init — no trained model found; using defaults until first training run");
+  logger.info("[modelService] init — no trained model found; using defaults until first training run");
 };
 
 /**
@@ -155,12 +156,12 @@ export const saveModel = async (model) => {
       .collection(MODELS_COLLECTION)
       .doc(CURRENT_MODEL_DOCID)
       .set(model);
-    console.log(
+    logger.info(
       `[modelService] saved ${model.version} to Firestore ` +
       `(${model.sampleCount} samples, loss=${model.finalLoss})`
     );
   } catch (err) {
-    console.warn(`[modelService] Firestore save failed: ${err.message} — writing to file only`);
+    logger.warn(`[modelService] Firestore save failed: ${err.message} — writing to file only`);
   }
 
   // 2. File backup (synchronous, best-effort)

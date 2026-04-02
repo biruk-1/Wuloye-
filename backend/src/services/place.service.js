@@ -39,6 +39,7 @@
 
 import { db }              from "../config/firebase.js";
 import { getNearbyPlaces } from "./googlePlaces.service.js";
+import { logger }          from "../utils/logger.js";
 
 export const PLACES_COLLECTION = "places";
 
@@ -74,7 +75,7 @@ const isCacheValid = () =>
 const setCache = (places) => {
   _cache     = places;
   _cacheTime = Date.now();
-  console.log(`[places] Cache updated — ${places.length} place(s) stored`);
+  logger.info(`[places] Cache updated — ${places.length} place(s) stored`);
 };
 
 /**
@@ -84,7 +85,7 @@ const setCache = (places) => {
 export const invalidateCache = () => {
   _cache     = null;
   _cacheTime = null;
-  console.log("[places] Cache invalidated");
+  logger.info("[places] Cache invalidated");
 };
 
 // ─── Core read helpers ────────────────────────────────────────────────────────
@@ -112,19 +113,19 @@ export const getAllPlaces = async (userLocation = null, radiusMeters = 5000) => 
   if (userLocation?.lat != null && process.env.GOOGLE_MAPS_API_KEY) {
     const googlePlaces = await getNearbyPlaces(userLocation, radiusMeters);
     if (googlePlaces.length > 0) {
-      console.log(`[places] Using ${googlePlaces.length} Google Maps place(s)`);
+      logger.info(`[places] Using ${googlePlaces.length} Google Maps place(s)`);
       return googlePlaces;
     }
-    console.log("[places] Google returned 0 results — falling back to Firestore");
+    logger.info("[places] Google returned 0 results — falling back to Firestore");
   }
 
   // ── Firestore path (original behaviour) ──────────────────────────────────────
   if (isCacheValid()) {
-    console.log(`[places] Cache hit — returning ${_cache.length} place(s)`);
+    logger.debug(`[places] Cache hit — returning ${_cache.length} place(s)`);
     return _cache;
   }
 
-  console.log("[places] Cache miss — loading from Firestore");
+  logger.info("[places] Cache miss — loading from Firestore");
   const snap = await db.collection(PLACES_COLLECTION).get();
   // Use snapshot document ID so place.id always matches Firestore doc id (e.g. place_1).
   const places = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
@@ -200,11 +201,11 @@ export const seedPlacesIfEmpty = async (seedData) => {
 
   if (!existingSnap.empty) {
     const total = (await db.collection(PLACES_COLLECTION).get()).size;
-    console.log(`[places] Seed skipped — collection already has ${total} document(s)`);
+    logger.info(`[places] Seed skipped — collection already has ${total} document(s)`);
     return { inserted: 0, skipped: true, existing: total };
   }
 
-  console.log(`[places] Seeding ${seedData.length} places…`);
+  logger.info(`[places] Seeding ${seedData.length} places...`);
 
   // Validate all places before writing anything.
   for (const place of seedData) {
@@ -231,6 +232,6 @@ export const seedPlacesIfEmpty = async (seedData) => {
   await batch.commit();
   invalidateCache();
 
-  console.log(`[places] Seeded ${inserted.length} places successfully`);
+  logger.info(`[places] Seeded ${inserted.length} places successfully`);
   return { inserted: inserted.length, skipped: false };
 };

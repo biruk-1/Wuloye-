@@ -31,13 +31,20 @@
 #                               performance (elapsedMs, cacheHit, fallbackActive,     [Phase 15]
 #                                            placesScored)
 #                               personalization (dominantHabits, topInterestWeights) [Phase 16]
+#                               experiment (experimentActive, experimentId, variantAssigned) [Phase 17]
 #   STEP 6b Cache test       -- second request must be a cache hit                    [Phase 15]
+#   STEP 6c Phase 17       -- optional: -Phase17Experiment (server needs EXPERIMENT_ACTIVE=true)
+#   STEP 6d Phase 18       -- health envelope, readiness deps.firestore, metrics endpoint,
+#                             rate-limit 429 burst check                              [Phase 18]
 #   STEP 7  Cleanup          -- delete the 2 test routines
 #
 # Exit code: 0 = PASSED, 1 = FAILED
 ###############################################################################
 
-param([string]$BaseUrl = "http://localhost:5000/api")
+param(
+    [string]$BaseUrl = "http://localhost:5000/api",
+    [switch]$Phase17Experiment
+)
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -47,13 +54,13 @@ function Print-Step([string]$msg) {
     Write-Host "  $msg" -ForegroundColor Cyan
     Write-Host "============================================" -ForegroundColor Cyan
 }
-function Print-Pass([string]$msg) { Write-Host "  [PASS]  $msg" -ForegroundColor Green }
+function Print-Pass([string]$msg) { Write-Host ('  [PASS]  {0}' -f $msg) -ForegroundColor Green }
 function Print-Fail([string]$msg) {
-    Write-Host "  [FAIL]  $msg" -ForegroundColor Red
+    Write-Host ('  [FAIL]  {0}' -f $msg) -ForegroundColor Red
     $script:failCount++
 }
-function Print-Info([string]$msg) { Write-Host "  [INFO]  $msg" -ForegroundColor Yellow }
-function Print-Warn([string]$msg) { Write-Host "  [WARN]  $msg" -ForegroundColor DarkYellow }
+function Print-Info([string]$msg) { Write-Host ('  [INFO]  {0}' -f $msg) -ForegroundColor Yellow }
+function Print-Warn([string]$msg) { Write-Host ('  [WARN]  {0}' -f $msg) -ForegroundColor DarkYellow }
 
 function Invoke-Api {
     param(
@@ -396,7 +403,7 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Fail "No result has interactionScore, affinityBoost, or typeAffinityScore non-zero -- interaction learning missing"
     }
 
-    # 5-D: v5 fields — freshnessBoost and explorationBoost must exist in breakdown
+    # 5-D: v5 fields - freshnessBoost and explorationBoost must exist in breakdown
     if ($null -ne $bd.PSObject.Properties["freshnessBoost"]) {
         Print-Pass "scoreBreakdown.freshnessBoost field present ($($bd.freshnessBoost))"
     } else {
@@ -436,7 +443,7 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Warn "Two consecutive places share the same type in top 5 -- diversity may be limited by catalogue size"
     }
 
-    # 5-H: v6 fields — typeAffinityScore and seenPenalty must exist
+    # 5-H: v6 fields - typeAffinityScore and seenPenalty must exist
     if ($null -ne $bd.PSObject.Properties["typeAffinityScore"]) {
         Print-Pass "scoreBreakdown.typeAffinityScore present ($($bd.typeAffinityScore))"
     } else {
@@ -461,7 +468,7 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Warn "typeAffinityScore = 0 in all results -- profile.typeAffinity may not have been updated yet"
     }
 
-    # 5-J: Phase 7 fields — intent, recent memory, late-night, echo chamber
+    # 5-J: Phase 7 fields - intent, recent memory, late-night, echo chamber
     $v7Fields = @(
         @{ name = "lateNightBoost";   prop = "lateNightBoost" },
         @{ name = "intentBoost";      prop = "intentBoost" },
@@ -486,7 +493,7 @@ if ($null -eq $topResult.scoreBreakdown) {
         Print-Fail "scoreBreakdown.detectedIntent invalid (got '$($bd.detectedIntent)')"
     }
 
-    # 5-K: Phase 8 fields — session layer, sequence, diversity, cold-start
+    # 5-K: Phase 8 fields - session layer, sequence, diversity, cold-start
     $p8Fields = @(
         @{ name = "sessionBoost";         prop = "sessionBoost" },
         @{ name = "sequenceBoost";        prop = "sequenceBoost" },
@@ -515,7 +522,7 @@ if ($null -eq $topResult.scoreBreakdown) {
     }
 
     # 5-M: at least one result should have sessionBoost > 0 after interactions
-    # (may be 0 on a fresh user with no session yet — WARN not FAIL)
+    # (may be 0 on a fresh user with no session yet - WARN not FAIL)
     $anySessionBoost = @($recs | Where-Object {
         $null -ne $_.scoreBreakdown -and $_.scoreBreakdown.sessionBoost -gt 0
     })
@@ -762,7 +769,7 @@ if ($null -eq $meta) {
         Print-Fail "meta.topInterestType is null -- type affinity not being computed"
     }
 
-    # 6-D: Phase 7 — meta.detectedIntent
+    # 6-D: Phase 7 - meta.detectedIntent
     $validMetaIntents = @("fitness", "social", "relax", "explore")
     if ($null -eq $meta.detectedIntent) {
         Print-Fail "meta.detectedIntent is missing"
@@ -781,7 +788,7 @@ if ($null -eq $meta) {
         Print-Fail "meta.detectedIntent ('$($meta.detectedIntent)') != top scoreBreakdown.detectedIntent ('$($topBd.detectedIntent)')"
     }
 
-    # 6-G: Phase 8 — meta.session block
+    # 6-G: Phase 8 - meta.session block
     if ($null -ne $meta.session) {
         $sess = $meta.session
         Print-Info "meta.session.dominantSessionType: $($sess.dominantSessionType)"
@@ -806,7 +813,7 @@ if ($null -eq $meta) {
         Print-Fail "meta.session is missing -- Phase 8 session meta not returned"
     }
 
-    # 6-H: Phase 9 — meta.longTerm block
+    # 6-H: Phase 9 - meta.longTerm block
     if ($null -ne $meta.longTerm) {
         $lt = $meta.longTerm
         Print-Info "meta.longTerm.topEmbeddingType  : $($lt.topEmbeddingType)"
@@ -828,7 +835,7 @@ if ($null -eq $meta) {
         Print-Fail "meta.longTerm is missing -- Phase 9 embedding meta not returned"
     }
 
-    # 6-I: Phase 10 — meta.exploration block
+    # 6-I: Phase 10 - meta.exploration block
     if ($null -ne $meta.exploration) {
         $exp = $meta.exploration
         Print-Info "meta.exploration.explorationWeight  : $($exp.explorationWeight)"
@@ -1040,7 +1047,7 @@ if ($null -eq $meta) {
             Print-Fail "meta.context.hour out of range (got $($ctx.hour))"
         }
 
-        # Phase 7: isLateNight must match night band (23–4) vs hour
+        # Phase 7: isLateNight must match night band (23-4) vs hour
         $expectedLateNight = ($ctx.hour -ge 23 -or $ctx.hour -lt 5)
         if ($null -ne $ctx.isLateNight -and $ctx.isLateNight -eq $expectedLateNight) {
             Print-Pass "meta.context.isLateNight = $($ctx.isLateNight) (consistent with hour $($ctx.hour))"
@@ -1154,6 +1161,30 @@ if ($null -eq $meta) {
         Print-Fail "meta.personalization is missing -- Phase 16 not applied"
     }
 
+    # 6-O: Phase 17 - meta.experiment (always returned; inactive unless EXPERIMENT_ACTIVE=true)
+    if ($null -ne $meta.experiment) {
+        $ex = $meta.experiment
+        Print-Info "meta.experiment.experimentActive : $($ex.experimentActive)"
+        Print-Info "meta.experiment.experimentId     : $($ex.experimentId)"
+        Print-Info "meta.experiment.variantAssigned  : $($ex.variantAssigned)"
+        if ($ex.experimentActive -eq $true) {
+            if ($ex.variantAssigned -eq "A" -or $ex.variantAssigned -eq "B") {
+                Print-Pass "meta.experiment active with variant $($ex.variantAssigned)"
+            } else {
+                Print-Fail "meta.experiment.variantAssigned must be A or B when active"
+            }
+        } else {
+            if ($null -eq $ex.variantAssigned) {
+                Print-Pass "meta.experiment inactive (variantAssigned null as expected)"
+            } else {
+                Print-Warn "meta.experiment inactive but variantAssigned is not null"
+            }
+        }
+        Print-Pass "meta.experiment block present (Phase 17)"
+    } else {
+        Print-Fail "meta.experiment is missing -- Phase 17 not applied"
+    }
+
     # Phase 16: at most 2 of the same type in top 5 results
     $top5 = @($recs | Select-Object -First 5)
     if ($top5.Count -eq 0) {
@@ -1192,20 +1223,159 @@ if ($recCacheRes.ok -and $recCacheRes.data.success) {
 
         if ($cacheHit -eq $true) {
             Print-Pass "Second request returned cacheHit=true (Phase 15 recommendation cache working)"
+            if ($elapsed -le 50) {
+                Print-Pass "Cached response in ${elapsed}ms (well under 300ms target)"
+            } else {
+                Print-Warn "cacheHit=true but elapsedMs=${elapsed}ms -- unusually slow for a cache hit"
+            }
         } else {
-            Print-Warn "cacheHit=false on second request -- cache may have been invalidated by a concurrent interaction, or request was debug=true"
-        }
-
-        if ($elapsed -le 50) {
-            Print-Pass "Cache hit responded in ${elapsed}ms (well under 300ms target)"
-        } else {
-            Print-Warn "Cache hit took ${elapsed}ms -- expected < 50ms for a cached response"
+            Print-Warn "cacheHit=false on second request -- cache empty (first non-debug fetch), key mismatch, or invalidated after STEP 4 debug request"
+            if ($elapsed -le 50) {
+                Print-Info "Second request still fast (${elapsed}ms) -- likely in-memory recomputation, not a cache hit"
+            } else {
+                Print-Warn "Second request took ${elapsed}ms without cache hit"
+            }
         }
     } else {
         Print-Fail "meta.performance missing on cache test request"
     }
 } else {
     Print-Warn "Cache test request failed -- skipping cache-hit assertion"
+}
+
+# ─── STEP 6c: Phase 17 experiment meta (optional) ────────────────────────────
+
+if ($Phase17Experiment) {
+    Print-Step "STEP 6c -- Phase 17: meta.experiment + dev experiment-metrics (EXPERIMENT_ACTIVE=true on server)"
+
+    $expRec = Invoke-Api -Method GET -Path "/recommendations" -Headers $authHeaders
+
+    if ($expRec.ok -and $expRec.data.success) {
+        $em = $expRec.data.meta.experiment
+        if ($null -ne $em) {
+            if ($em.experimentActive -eq $true) {
+                Print-Pass "meta.experiment.experimentActive is true"
+                if ($em.experimentId) {
+                    Print-Pass "meta.experiment.experimentId present ($($em.experimentId))"
+                } else {
+                    Print-Fail "meta.experiment.experimentId missing"
+                }
+                $va = [string]$em.variantAssigned
+                if ($va -eq "A" -or $va -eq "B") {
+                    Print-Pass "meta.experiment.variantAssigned is $va"
+                } else {
+                    Print-Fail "meta.experiment.variantAssigned must be A or B, got '$va'"
+                }
+            } else {
+                Print-Fail "meta.experiment.experimentActive is false - start the API with EXPERIMENT_ACTIVE=true for Phase 17 checks"
+            }
+        } else {
+            Print-Fail "meta.experiment missing - ensure Phase 17 code is deployed and EXPERIMENT_ACTIVE=true"
+        }
+
+        # Second non-debug request should still hit cache (variant in cache key)
+        $expRec2 = Invoke-Api -Method GET -Path "/recommendations" -Headers $authHeaders
+        if ($expRec2.ok -and $expRec2.data.success -and $null -ne $expRec2.data.meta.performance) {
+            if ($expRec2.data.meta.performance.cacheHit -eq $true) {
+                Print-Pass "Phase 17: second /recommendations request is cacheHit=true (variant-scoped cache)"
+            } else {
+                Print-Warn "Phase 17: cacheHit=false on second request - may be cold start or concurrent invalidation"
+            }
+        }
+
+        $devMetrics = Invoke-Api -Method GET -Path "/dev/experiment-metrics?days=30" -Headers $authHeaders
+        if ($devMetrics.ok -and $devMetrics.data.success) {
+            $dm = $devMetrics.data.data
+            if ($null -ne $dm.variants.A -and $null -ne $dm.variants.B) {
+                Print-Pass "GET /api/dev/experiment-metrics returned variants A and B"
+            } else {
+                Print-Fail "experiment-metrics response missing variants A/B"
+            }
+        } else {
+            Print-Warn "GET /api/dev/experiment-metrics failed (is NODE_ENV=production?)"
+        }
+    } else {
+        Print-Fail "STEP 6c: GET /recommendations failed for experiment check"
+    }
+}
+
+# ─── STEP 6d: Phase 18 -- health envelope + readiness + rate-limit ────────────
+
+Print-Step "STEP 6d -- Phase 18: health envelope, readiness check, rate-limit 429"
+
+# --- 6d.1: health envelope ---
+$healthRes = Invoke-Api -Method GET -Path "/health"
+if ($healthRes.ok) {
+    $hData = $healthRes.data
+    # success field (envelope check)
+    if ($null -ne $hData.success) {
+        Print-Pass "STEP 6d.1: /health returns envelope (success field present)"
+    } else {
+        Print-Fail "STEP 6d.1: /health missing 'success' field in envelope"
+    }
+    # data.status
+    if ($null -ne $hData.data.status) {
+        Print-Pass ("STEP 6d.1: /health data.status = " + $hData.data.status)
+    } else {
+        Print-Fail "STEP 6d.1: /health missing data.status"
+    }
+    # data.dependencies.firestore
+    if ($null -ne $hData.data.dependencies) {
+        Print-Pass ("STEP 6d.1: /health data.dependencies.firestore = " + $hData.data.dependencies.firestore)
+    } else {
+        Print-Warn "STEP 6d.1: /health missing data.dependencies (firestore probe may be skipped in emulator)"
+    }
+    # message field
+    if ($null -ne $hData.message) {
+        Print-Pass "STEP 6d.1: /health message field present"
+    } else {
+        Print-Fail "STEP 6d.1: /health missing message field"
+    }
+} else {
+    Print-Fail "STEP 6d.1: GET /health failed"
+}
+
+# --- 6d.2: metrics endpoint ---
+$metricsRes = Invoke-Api -Method GET -Path "/health/metrics"
+if ($metricsRes.ok -and $metricsRes.data.success) {
+    $mData = $metricsRes.data.data
+    if ($null -ne $mData.requestCount) {
+        Print-Pass ("STEP 6d.2: /health/metrics requestCount = " + $mData.requestCount)
+    } else {
+        Print-Fail "STEP 6d.2: /health/metrics missing requestCount"
+    }
+    if ($null -ne $mData.p50Ms) {
+        Print-Pass ("STEP 6d.2: /health/metrics p50Ms = " + $mData.p50Ms)
+    } else {
+        Print-Fail "STEP 6d.2: /health/metrics missing p50Ms"
+    }
+} else {
+    Print-Fail "STEP 6d.2: GET /health/metrics failed"
+}
+
+# --- 6d.3: rate-limit 429 ---
+# Fire 65 rapid requests to /recommendations (no token needed to trigger global limiter).
+# The global limiter limit is configurable; in tests we check that *at least one* returns 429
+# only when the server is configured with a very low limit. In default (300/15min) the test
+# just confirms the limiter middleware is wired.
+# We use a stripped-down loop to avoid slowing the suite.
+Print-Info "STEP 6d.3: rate-limit -- sending 65 rapid unauthenticated requests to /recommendations ..."
+$got429 = $false
+for ($i = 0; $i -lt 65; $i++) {
+    try {
+        $r = Invoke-WebRequest -Uri "$BaseUrl/recommendations" -Method GET -UseBasicParsing -ErrorAction SilentlyContinue
+        if ($r.StatusCode -eq 429) { $got429 = $true; break }
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -eq 429) { $got429 = $true; break }
+        # 401 is expected for unauthenticated requests -- keep looping
+    }
+}
+if ($got429) {
+    Print-Pass "STEP 6d.3: rate-limiter returned 429 after burst"
+} else {
+    # Not a failure in default config (300 req/15 min > 65); just informational.
+    Print-Info "STEP 6d.3: No 429 returned in 65 requests (expected with default RATE_LIMIT_GLOBAL_MAX=300)"
 }
 
 # ─── STEP 7: Cleanup ─────────────────────────────────────────────────────────
@@ -1231,7 +1401,7 @@ if ($script:failCount -eq 0) {
     Write-Host "  All checks OK. Data -> Behavior -> Learning -> Decision confirmed." -ForegroundColor Green
 } else {
     Write-Host "  System integration test FAILED" -ForegroundColor Red
-    Write-Host "  $($script:failCount) check(s) failed. Review [FAIL] lines above." -ForegroundColor Red
+    Write-Host ('  {0} check(s) failed. Review [FAIL] lines above.' -f $script:failCount) -ForegroundColor Red
 }
 
 Write-Host "============================================" -ForegroundColor Magenta

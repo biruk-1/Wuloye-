@@ -35,6 +35,7 @@ import {
   buildPlaceEmbedding,
   cosineSimilarity,
 }                           from "../../utils/embedding.js";
+import { logger }            from "../../utils/logger.js";
 
 const INTERACTIONS_COLLECTION = "interactions";
 const USERS_COLLECTION        = "users";
@@ -325,7 +326,7 @@ export const buildTrainingData = async (limit = 10_000) => {
     });
   }
 
-  console.log(
+  logger.info(
     `[trainingData] built ${dataset.length} samples from ${interactions.length} interactions ` +
     `(${FEATURE_COUNT} features)`
   );

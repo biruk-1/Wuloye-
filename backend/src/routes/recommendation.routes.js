@@ -9,10 +9,11 @@ import { Router } from "express";
 
 import { authenticate } from "../middleware/auth.middleware.js";
 import { getRecommendationsHandler } from "../controllers/recommendation.controller.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
 // GET /api/recommendations  — personalised ranked place list
-router.get("/", authenticate, getRecommendationsHandler);
+router.get("/", authLimiter, authenticate, getRecommendationsHandler);
 
 export default router;

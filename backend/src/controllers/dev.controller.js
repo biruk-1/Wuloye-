@@ -8,6 +8,7 @@
 
 import { seedPlacesIfEmpty, getAllPlaces } from "../services/place.service.js";
 import { SEED_PLACES } from "../data/places.seed.js";
+import { aggregateExperimentMetrics } from "../services/interaction.service.js";
 
 /**
  * POST /api/dev/seed-places
@@ -55,6 +56,32 @@ export const listPlacesHandler = async (req, res, next) => {
       success: true,
       data:    places,
       message: `${places.length} place(s) found`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/experiment-metrics?days=7&maxDocs=5000
+ *
+ * Phase 17 — per-variant CTR, save rate, dismiss rate over recent interactions.
+ *
+ * @type {import("express").RequestHandler}
+ */
+export const experimentMetricsHandler = async (req, res, next) => {
+  try {
+    const daysRaw   = parseInt(String(req.query.days ?? "7"), 10);
+    const maxRaw    = parseInt(String(req.query.maxDocs ?? "5000"), 10);
+    const days      = Number.isFinite(daysRaw) ? Math.min(365, Math.max(1, daysRaw)) : 7;
+    const maxDocs   = Number.isFinite(maxRaw) ? Math.min(20000, Math.max(100, maxRaw)) : 5000;
+
+    const data = await aggregateExperimentMetrics(days, maxDocs);
+
+    return res.status(200).json({
+      success: true,
+      data,
+      message: "Experiment metrics aggregated",
     });
   } catch (error) {
     next(error);

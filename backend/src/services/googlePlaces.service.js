@@ -32,6 +32,8 @@
  *   source            {string}  — always "google_maps"
  */
 
+import { logger } from "../utils/logger.js";
+
 const GOOGLE_API_BASE = "https://maps.googleapis.com/maps/api/place";
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
@@ -204,13 +206,13 @@ const fetchNearby = async (lat, lng, radius, googleType, apiKey) => {
 export const getNearbyPlaces = async (userLocation, radiusMeters = 5000) => {
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
   if (!apiKey) {
-    console.warn("[googlePlaces] GOOGLE_MAPS_API_KEY not set — skipping Google Places fetch");
+    logger.warn("[googlePlaces] GOOGLE_MAPS_API_KEY not set — skipping Google Places fetch");
     return [];
   }
 
   const { lat, lng } = userLocation;
   if (lat == null || lng == null) {
-    console.warn("[googlePlaces] Invalid userLocation — lat and lng are required");
+    logger.warn("[googlePlaces] Invalid userLocation — lat and lng are required");
     return [];
   }
 
@@ -218,11 +220,11 @@ export const getNearbyPlaces = async (userLocation, radiusMeters = 5000) => {
   const cacheKey = `${Math.round(lat * 100) / 100}_${Math.round(lng * 100) / 100}_${Math.round(radiusMeters / 1000)}km`;
   const cached   = _cache.get(cacheKey);
   if (cached && Date.now() - cached.ts < CACHE_TTL_MS) {
-    console.log(`[googlePlaces] Cache hit for ${cacheKey} — ${cached.places.length} place(s)`);
+    logger.debug(`[googlePlaces] Cache hit for ${cacheKey} — ${cached.places.length} place(s)`);
     return cached.places;
   }
 
-  console.log(`[googlePlaces] Fetching nearby places lat=${lat} lng=${lng} radius=${radiusMeters}m`);
+  logger.info(`[googlePlaces] Fetching nearby places lat=${lat} lng=${lng} radius=${radiusMeters}m`);
 
   try {
     // Fire all type queries in parallel; use allSettled so one failure doesn't abort.
@@ -235,7 +237,7 @@ export const getNearbyPlaces = async (userLocation, radiusMeters = 5000) => {
 
     for (const result of batches) {
       if (result.status !== "fulfilled") {
-        console.warn("[googlePlaces] One type query failed:", result.reason?.message);
+        logger.warn("[googlePlaces] One type query failed:", { message: result.reason?.message });
         continue;
       }
       for (const raw of result.value) {
@@ -246,11 +248,11 @@ export const getNearbyPlaces = async (userLocation, radiusMeters = 5000) => {
       }
     }
 
-    console.log(`[googlePlaces] Fetched ${places.length} unique mappable place(s) for ${cacheKey}`);
+    logger.info(`[googlePlaces] Fetched ${places.length} unique mappable place(s) for ${cacheKey}`);
     _cache.set(cacheKey, { places, ts: Date.now() });
     return places;
   } catch (err) {
-    console.error("[googlePlaces] Fetch failed:", err.message);
+    logger.error("[googlePlaces] Fetch failed:", { message: err.message });
     return [];
   }
 };
@@ -258,5 +260,5 @@ export const getNearbyPlaces = async (userLocation, radiusMeters = 5000) => {
 /** Purges all cached entries (useful in tests). */
 export const invalidateGoogleCache = () => {
   _cache.clear();
-  console.log("[googlePlaces] Cache purged");
+  logger.info("[googlePlaces] Cache purged");
 };

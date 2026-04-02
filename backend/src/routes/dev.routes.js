@@ -6,12 +6,17 @@
  * so no dev tooling surface is exposed in prod regardless of what is imported.
  *
  * Endpoints:
- *   POST /api/dev/seed-places  — seed the places collection if empty
- *   GET  /api/dev/places       — inspect all places currently in Firestore
+ *   POST /api/dev/seed-places       — seed the places collection if empty
+ *   GET  /api/dev/places            — inspect all places currently in Firestore
+ *   GET  /api/dev/experiment-metrics — Phase 17: CTR / save / dismiss by variant
  */
 
 import { Router } from "express";
-import { seedPlacesHandler, listPlacesHandler } from "../controllers/dev.controller.js";
+import {
+  seedPlacesHandler,
+  listPlacesHandler,
+  experimentMetricsHandler,
+} from "../controllers/dev.controller.js";
 
 const router = Router();
 
@@ -33,5 +38,8 @@ router.post("/seed-places", seedPlacesHandler);
 
 // GET  /api/dev/places
 router.get("/places", listPlacesHandler);
+
+// GET  /api/dev/experiment-metrics
+router.get("/experiment-metrics", experimentMetricsHandler);
 
 export default router;

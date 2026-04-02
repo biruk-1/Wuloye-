@@ -15,16 +15,17 @@ import {
   logInteractionsBatchHandler,
   getInteractionsHandler,
 } from "../controllers/interaction.controller.js";
+import { authLimiter } from "../middleware/rateLimiter.js";
 
 const router = Router();
 
 // POST /api/interactions  — log a new interaction
-router.post("/", authenticate, logInteractionHandler);
+router.post("/", authLimiter, authenticate, logInteractionHandler);
 
 // POST /api/interactions/batch — Phase 15: batch write multiple interactions
-router.post("/batch", authenticate, logInteractionsBatchHandler);
+router.post("/batch", authLimiter, authenticate, logInteractionsBatchHandler);
 
 // GET  /api/interactions  — fetch the authenticated user's recent interactions
-router.get("/", authenticate, getInteractionsHandler);
+router.get("/", authLimiter, authenticate, getInteractionsHandler);
 
 export default router;

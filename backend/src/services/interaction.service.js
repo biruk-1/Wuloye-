@@ -33,8 +33,23 @@ import {
   profileDataCache,
   derivedSignalsCache,
 } from "../utils/cache.js";
+import {
+  isExperimentActive,
+  getVariantForUser,
+  EXPERIMENT_ID,
+} from "../utils/experiment.js";
+import { logger } from "../utils/logger.js";
 
 const INTERACTIONS_COLLECTION = "interactions";
+
+/** Phase 17: optional top-level fields when EXPERIMENT_ACTIVE=true */
+const experimentStampForUser = (userId) => {
+  if (!isExperimentActive()) return {};
+  return {
+    experimentId:      EXPERIMENT_ID,
+    experimentVariant: getVariantForUser(userId),
+  };
+};
 
 /** Allowed actionType values and their corresponding scores. */
 export const ACTION_SCORES = Object.freeze({
@@ -94,6 +109,8 @@ const resolvePlaceInfo = async (placeId) => {
 export const createInteraction = async (userId, placeId, actionType, metadata = null) => {
   const docRef = db.collection(INTERACTIONS_COLLECTION).doc();
 
+  const stamp = experimentStampForUser(userId);
+
   const interaction = {
     id: docRef.id,
     userId,
@@ -102,6 +119,7 @@ export const createInteraction = async (userId, placeId, actionType, metadata = 
     score:     ACTION_SCORES[actionType],
     metadata:  metadata ?? null,
     createdAt: new Date().toISOString(),
+    ...stamp,
   };
 
   // Persist the interaction first so it's never lost even if intelligence update fails.
@@ -121,7 +139,7 @@ export const createInteraction = async (userId, placeId, actionType, metadata = 
   // Fire-and-forget: check if a model retrain is due.
   // Never awaited — failures are warned but never surface to the caller.
   maybeRetrain().catch((err) =>
-    console.warn(`[interaction] retrainModel check failed: ${err.message}`)
+    logger.warn(`[interaction] retrainModel check failed: ${err.message}`)
   );
 
   // ── Phase 15: Cache invalidation ─────────────────────────────────────────────
@@ -131,7 +149,7 @@ export const createInteraction = async (userId, placeId, actionType, metadata = 
   recommendationCache.deleteByPrefix(`rec:${userId}:`);
   profileDataCache.delete(`pd:${userId}`);
   derivedSignalsCache.deleteByPrefix(`ds:${userId}:`);
-  console.log(`[interaction] caches invalidated for uid=${userId}`);
+  logger.info(`[interaction] caches invalidated for uid=${userId}`);
 
   return interaction;
 };
@@ -158,6 +176,7 @@ export const createInteractionsBatch = async (userId, items) => {
 
   const writeBatch = db.batch();
   const results = [];
+  const stamp      = experimentStampForUser(userId);
 
   for (const item of items) {
     const { placeId, actionType, metadata } = item;
@@ -181,6 +200,7 @@ export const createInteractionsBatch = async (userId, items) => {
       score:     ACTION_SCORES[actionType],
       metadata:  metadata ?? null,
       createdAt: new Date().toISOString(),
+      ...stamp,
     };
     writeBatch.set(docRef, interaction);
     results.push(interaction);
@@ -198,13 +218,13 @@ export const createInteractionsBatch = async (userId, items) => {
   }
 
   maybeRetrain().catch((err) =>
-    console.warn(`[interaction] retrainModel check failed: ${err.message}`)
+    logger.warn(`[interaction] retrainModel check failed: ${err.message}`)
   );
 
   recommendationCache.deleteByPrefix(`rec:${userId}:`);
   profileDataCache.delete(`pd:${userId}`);
   derivedSignalsCache.deleteByPrefix(`ds:${userId}:`);
-  console.log(`[interaction] batch (${results.length}) caches invalidated for uid=${userId}`);
+  logger.info(`[interaction] batch (${results.length}) caches invalidated for uid=${userId}`);
 
   return results;
 };
@@ -225,4 +245,77 @@ export const getInteractionsByUser = async (userId, limit = 50) => {
     .get();
 
   return snapshot.docs.map((doc) => doc.data());
+};
+
+/**
+ * Phase 17 — aggregate CTR / save / dismiss rates by variant for dev evaluation.
+ * Fetches recent `interactions` by `createdAt` (bounded), then filters in memory
+ * to `experimentId === EXPERIMENT_ID`. Requires composite index on `createdAt`
+ * for range + order; otherwise deploy the index from the Firebase error link.
+ *
+ * @param {number} [days=7]
+ * @param {number} [maxDocs=5000]
+ */
+export const aggregateExperimentMetrics = async (days = 7, maxDocs = 5000) => {
+  const cutoffIso = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const snapshot = await db
+    .collection(INTERACTIONS_COLLECTION)
+    .where("createdAt", ">=", cutoffIso)
+    .orderBy("createdAt", "desc")
+    .limit(maxDocs)
+    .get();
+
+  const counts = {
+    A: { views: 0, clicks: 0, saves: 0, dismisses: 0 },
+    B: { views: 0, clicks: 0, saves: 0, dismisses: 0 },
+  };
+
+  for (const doc of snapshot.docs) {
+    const d = doc.data();
+    if (d.experimentId !== EXPERIMENT_ID) continue;
+    const v = d.experimentVariant;
+    if (v !== "A" && v !== "B") continue;
+    const bucket = counts[v];
+    switch (d.actionType) {
+      case "view":
+        bucket.views++;
+        break;
+      case "click":
+        bucket.clicks++;
+        break;
+      case "save":
+        bucket.saves++;
+        break;
+      case "dismiss":
+        bucket.dismisses++;
+        break;
+      default:
+        break;
+    }
+  }
+
+  const withRates = (bucket) => {
+    const views = bucket.views;
+    return {
+      views,
+      clicks:    bucket.clicks,
+      saves:     bucket.saves,
+      dismisses: bucket.dismisses,
+      ctr:         views > 0 ? bucket.clicks / views : 0,
+      saveRate:    views > 0 ? bucket.saves / views : 0,
+      dismissRate: views > 0 ? bucket.dismisses / views : 0,
+    };
+  };
+
+  return {
+    experimentId: EXPERIMENT_ID,
+    days,
+    maxDocs,
+    scanned: snapshot.size,
+    variants: {
+      A: withRates(counts.A),
+      B: withRates(counts.B),
+    },
+  };
 };

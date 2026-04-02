@@ -23,6 +23,7 @@
  */
 
 import { db } from "../config/firebase.js";
+import { logger } from "../utils/logger.js";
 
 const SESSION_COLLECTION  = "sessions";
 
@@ -117,7 +118,7 @@ export const updateSession = async (userId, action) => {
     await ref.set({ recentActions: next, updatedAt: Date.now() }, { merge: false });
   } catch (err) {
     // Non-fatal: log and continue so the caller's response is unaffected.
-    console.warn(`[session] updateSession failed for uid=${userId}: ${err.message}`);
+    logger.warn(`[session] updateSession failed for uid=${userId}: ${err.message}`);
   }
 };
 
