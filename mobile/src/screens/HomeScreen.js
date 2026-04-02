@@ -204,7 +204,14 @@ export default function HomeScreen({ navigation }) {
                 </View>
 
                 <View style={styles.filtersRow}>
-                    <Text style={styles.filterChipActive}>For You</Text>
+                    <LinearGradient
+                        colors={gradients.primaryButtonMint}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.filterChipActiveWrap}
+                    >
+                        <Text style={styles.filterChipActive}>For You</Text>
+                    </LinearGradient>
                     <Text style={styles.filterChip}>Trending</Text>
                     <Text style={styles.filterChip}>Nearby</Text>
                 </View>
@@ -291,8 +298,11 @@ function createStyles(palette) {
             marginTop: 14,
             marginBottom: 12,
         },
+        filterChipActiveWrap: {
+            borderRadius: 999,
+            overflow: "hidden",
+        },
         filterChipActive: {
-            backgroundColor: palette.oceanBlue,
             color: palette.iceWhite,
             fontWeight: "800",
             fontSize: 11,

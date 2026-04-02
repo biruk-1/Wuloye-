@@ -2,6 +2,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
 import { useMemo } from "react";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../context/AuthContext";
 import LoginScreen from "../screens/LoginScreen";
 import ProfileSetupScreen from "../screens/ProfileSetupScreen";
@@ -23,7 +24,14 @@ function hasCompletedOnboarding(profile) {
  * Shown when the app is authenticated but GET /api/profile failed (network error,
  * server unreachable, etc.). Allows the user to retry or sign out.
  */
-function ProfileErrorScreen({ onRetry, onSignOut, message, palette, styles }) {
+function ProfileErrorScreen({
+    onRetry,
+    onSignOut,
+    message,
+    palette,
+    gradients,
+    styles,
+}) {
     return (
         <View style={styles.container}>
             <View style={styles.iconWrap}>
@@ -38,8 +46,15 @@ function ProfileErrorScreen({ onRetry, onSignOut, message, palette, styles }) {
                 {message ??
                     "We couldn't reach the server. Check your connection and try again."}
             </Text>
-            <Pressable style={styles.retryBtn} onPress={onRetry}>
-                <Text style={styles.retryText}>Retry</Text>
+            <Pressable style={styles.retryBtnWrap} onPress={onRetry}>
+                <LinearGradient
+                    colors={gradients.primaryButtonMint}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.retryBtn}
+                >
+                    <Text style={styles.retryText}>Retry</Text>
+                </LinearGradient>
             </Pressable>
             <Pressable style={styles.signOutBtn} onPress={onSignOut}>
                 <Text style={styles.signOutText}>Sign out</Text>
@@ -51,7 +66,7 @@ function ProfileErrorScreen({ onRetry, onSignOut, message, palette, styles }) {
 // ─── Navigator ────────────────────────────────────────────────────────────────
 
 export default function AppNavigator() {
-    const { palette } = useAppTheme();
+    const { palette, gradients } = useAppTheme();
     const errStyles = useMemo(() => createErrStyles(palette), [palette]);
 
     const { user, ready, profile, profileError, retryProfileLoad, clearAuth } =
@@ -84,6 +99,7 @@ export default function AppNavigator() {
                 onRetry={retryProfileLoad}
                 onSignOut={clearAuth}
                 palette={palette}
+                gradients={gradients}
                 styles={errStyles}
             />
         );
@@ -144,12 +160,16 @@ function createErrStyles(palette) {
             lineHeight: 22,
             textAlign: "center",
         },
-        retryBtn: {
+        retryBtnWrap: {
             marginTop: 28,
             width: "100%",
             height: 52,
             borderRadius: 14,
-            backgroundColor: palette.oceanBlue,
+            overflow: "hidden",
+        },
+        retryBtn: {
+            flex: 1,
+            borderRadius: 14,
             alignItems: "center",
             justifyContent: "center",
         },
