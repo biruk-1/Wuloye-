@@ -134,7 +134,6 @@ export default function ProfileScreen({ navigation }) {
                         style={styles.logoutBtn}
                         onPress={async () => {
                             await clearAuth();
-                            navigation.replace("Login");
                         }}
                     >
                         <Ionicons

@@ -4,6 +4,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import Loader from "../components/Loader";
 import { getProfile, updateProfile } from "../api/profileApi";
+import { useAuth } from "../context/AuthContext";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
 
 const INTERESTS = [
@@ -44,6 +45,7 @@ function SelectChip({ label, selected, onPress }) {
 }
 
 export default function ProfileSetupScreen({ navigation }) {
+    const { refreshProfile } = useAuth();
     const [interests, setInterests] = useState([]);
     const [budget, setBudget] = useState("medium");
     const [locationPreference, setLocationPreference] = useState("any");
@@ -124,6 +126,7 @@ export default function ProfileSetupScreen({ navigation }) {
                 budgetRange: budget,
                 locationPreference,
             });
+            await refreshProfile();
             navigation.navigate("RoutineBuilder");
         } catch (err) {
             setError(getApiErrorMessage(err, "Unable to save profile."));
