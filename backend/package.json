@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "seed:places": "node scripts/seedPlaces.js"
+    "seed:places": "node scripts/seedPlaces.js",
+    "mobile": "npx expo start \"..\\Wuloye-\\mobile\""
   },
   "dependencies": {
     "cors": "^2.8.5",
