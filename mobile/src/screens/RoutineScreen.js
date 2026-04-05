@@ -8,6 +8,7 @@ import Loader from "../components/Loader";
 import EmptyState from "../components/EmptyState";
 import { createRoutine, deleteRoutine, getRoutines } from "../api/routineApi";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 const ROUTINE_SAMPLES = [
     {
@@ -42,10 +43,14 @@ function formatLabel(value) {
 }
 
 export default function RoutineScreen() {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const [routines, setRoutines] = useState([]);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
+    const [refreshing, setRefreshing] = useState(false);
 
     const fetchRoutines = useCallback(async () => {
         try {
@@ -64,6 +69,15 @@ export default function RoutineScreen() {
     useEffect(() => {
         fetchRoutines();
     }, [fetchRoutines]);
+
+    async function handleRefresh() {
+        try {
+            setRefreshing(true);
+            await fetchRoutines();
+        } finally {
+            setRefreshing(false);
+        }
+    }
 
     const sample = useMemo(
         () => ROUTINE_SAMPLES[routines.length % ROUTINE_SAMPLES.length],
@@ -107,16 +121,16 @@ export default function RoutineScreen() {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0B1529", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <View style={styles.headerRow}>
                     <Text style={styles.headerTitle}>My Routines</Text>
-                    <Pressable style={styles.bellWrap}>
+                    <Pressable style={styles.bellWrap} onPress={handleRefresh}>
                         <Ionicons
                             name="notifications-outline"
                             size={18}
-                            color="#D3DEEF"
+                            color={palette.deepBlue}
                         />
                     </Pressable>
                 </View>
@@ -140,6 +154,8 @@ export default function RoutineScreen() {
                     <FlatList
                         data={routines}
                         keyExtractor={(item) => item.id}
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
                         contentContainerStyle={styles.listContent}
                         renderItem={({ item }) => (
                             <View style={styles.card}>
@@ -175,7 +191,7 @@ export default function RoutineScreen() {
                                     <Ionicons
                                         name="trash-outline"
                                         size={14}
-                                        color="#AFC0D9"
+                                        color={palette.deepBlue}
                                     />
                                 </Pressable>
                             </View>
@@ -184,131 +200,141 @@ export default function RoutineScreen() {
                 )}
 
                 <Pressable style={styles.fab} onPress={handleAddRoutine}>
-                    <Ionicons name="add" size={24} color="#1F1F1F" />
+                    <Ionicons name="add" size={24} color={palette.iceWhite} />
                 </Pressable>
             </LinearGradient>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: "#050A17" },
-    screen: { flex: 1, paddingHorizontal: 16 },
-    headerRow: {
-        marginTop: 2,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    headerTitle: {
-        color: "#F0F5FD",
-        fontSize: 30,
-        fontWeight: "800",
-    },
-    bellWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.15)",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    statsRow: {
-        marginTop: 14,
-        flexDirection: "row",
-        gap: 10,
-    },
-    statCard: {
-        flex: 1,
-        borderRadius: 18,
-        padding: 14,
-        backgroundColor: "rgba(255,255,255,0.05)",
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
-    },
-    statMain: {
-        color: "#F7C72C",
-        fontSize: 28,
-        fontWeight: "800",
-    },
-    statLabel: {
-        color: "#9FB3CE",
-        fontSize: 12,
-        marginTop: 2,
-    },
-    errorText: {
-        color: "#F7B2B2",
-        marginTop: 8,
-        fontSize: 12,
-    },
-    listContent: {
-        paddingTop: 16,
-        paddingBottom: 90,
-        gap: 12,
-    },
-    card: {
-        borderRadius: 18,
-        padding: 14,
-        backgroundColor: "rgba(255,255,255,0.04)",
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
-    },
-    weekday: {
-        color: "#F7C72C",
-        fontSize: 12,
-        fontWeight: "800",
-        textTransform: "uppercase",
-        letterSpacing: 0.7,
-    },
-    period: {
-        marginTop: 6,
-        color: "#8EA5C5",
-        fontSize: 12,
-    },
-    activity: {
-        marginTop: 4,
-        color: "#EAF0FB",
-        fontSize: 22,
-        fontWeight: "800",
-    },
-    badgesRow: {
-        marginTop: 8,
-        flexDirection: "row",
-        gap: 8,
-        flexWrap: "wrap",
-    },
-    badge: {
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.15)",
-    },
-    badgeText: {
-        color: "#AFC0D9",
-        fontSize: 11,
-        fontWeight: "700",
-    },
-    deletePill: {
-        position: "absolute",
-        right: 10,
-        top: 10,
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.18)",
-        paddingHorizontal: 8,
-        paddingVertical: 6,
-    },
-    fab: {
-        position: "absolute",
-        right: 20,
-        bottom: 22,
-        width: 52,
-        height: 52,
-        borderRadius: 26,
-        backgroundColor: "#F7C72C",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: { flex: 1, backgroundColor: palette.pageTop },
+        screen: { flex: 1, paddingHorizontal: 16 },
+        headerRow: {
+            marginTop: 2,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+        },
+        headerTitle: {
+            color: palette.textPrimary,
+            fontSize: 30,
+            fontWeight: "800",
+        },
+        bellWrap: {
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        statsRow: {
+            marginTop: 14,
+            flexDirection: "row",
+            gap: 10,
+        },
+        statCard: {
+            flex: 1,
+            borderRadius: 18,
+            padding: 14,
+            backgroundColor: palette.surface,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+        },
+        statMain: {
+            color: palette.oceanBlue,
+            fontSize: 28,
+            fontWeight: "800",
+        },
+        statLabel: {
+            color: palette.textSecondary,
+            fontSize: 12,
+            marginTop: 2,
+        },
+        errorText: {
+            color: palette.danger,
+            marginTop: 8,
+            fontSize: 12,
+        },
+        listContent: {
+            paddingTop: 16,
+            paddingBottom: 90,
+            gap: 12,
+        },
+        card: {
+            borderRadius: 18,
+            padding: 14,
+            backgroundColor: palette.surface,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+        },
+        weekday: {
+            color: palette.emerald,
+            fontSize: 12,
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: 0.7,
+        },
+        period: {
+            marginTop: 6,
+            color: palette.textSecondary,
+            fontSize: 12,
+        },
+        activity: {
+            marginTop: 4,
+            color: palette.textPrimary,
+            fontSize: 22,
+            fontWeight: "800",
+        },
+        badgesRow: {
+            marginTop: 8,
+            flexDirection: "row",
+            gap: 8,
+            flexWrap: "wrap",
+        },
+        badge: {
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surfaceStrong,
+        },
+        badgeText: {
+            color: palette.textSecondary,
+            fontSize: 11,
+            fontWeight: "700",
+        },
+        deletePill: {
+            position: "absolute",
+            right: 10,
+            top: 10,
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surfaceStrong,
+            paddingHorizontal: 8,
+            paddingVertical: 6,
+        },
+        fab: {
+            position: "absolute",
+            right: 20,
+            bottom: 22,
+            width: 52,
+            height: 52,
+            borderRadius: 26,
+            backgroundColor: palette.oceanBlue,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#269AE3",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 12,
+            elevation: 8,
+        },
+    });
+}

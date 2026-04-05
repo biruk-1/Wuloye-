@@ -18,6 +18,7 @@ import {
 } from "../api/recommendationApi";
 import { INTERACTION_TYPES } from "../utils/constants";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 function normalisePlace(item, index) {
     const id =
@@ -61,10 +62,14 @@ function normalisePlace(item, index) {
 }
 
 export default function HomeScreen({ navigation }) {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [name, setName] = useState("there");
     const [places, setPlaces] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
 
     const fetchData = useCallback(async () => {
         try {
@@ -111,6 +116,15 @@ export default function HomeScreen({ navigation }) {
     useEffect(() => {
         fetchData();
     }, [fetchData]);
+
+    async function handleRefresh() {
+        try {
+            setRefreshing(true);
+            await fetchData();
+        } finally {
+            setRefreshing(false);
+        }
+    }
 
     async function handleOpenDetail(place) {
         try {
@@ -168,7 +182,7 @@ export default function HomeScreen({ navigation }) {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0B1529", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <View style={styles.topRow}>
@@ -180,11 +194,11 @@ export default function HomeScreen({ navigation }) {
                             Places we think you'll love today
                         </Text>
                     </View>
-                    <Pressable style={styles.bellWrap}>
+                    <Pressable style={styles.bellWrap} onPress={handleRefresh}>
                         <Ionicons
                             name="notifications-outline"
                             size={18}
-                            color="#D3DEEF"
+                            color={palette.deepBlue}
                         />
                     </Pressable>
                 </View>
@@ -208,6 +222,8 @@ export default function HomeScreen({ navigation }) {
                         data={data}
                         keyExtractor={(item) => item.id}
                         showsVerticalScrollIndicator={false}
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
                         contentContainerStyle={styles.listContent}
                         renderItem={({ item }) => (
                             <PlaceCard
@@ -224,77 +240,81 @@ export default function HomeScreen({ navigation }) {
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: {
-        flex: 1,
-        backgroundColor: "#050A17",
-    },
-    screen: {
-        flex: 1,
-        paddingHorizontal: 16,
-    },
-    topRow: {
-        marginTop: 4,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "flex-start",
-    },
-    greeting: {
-        color: "#F7C72C",
-        fontSize: 13,
-        fontWeight: "800",
-    },
-    errorText: {
-        color: "#F7B2B2",
-        marginBottom: 10,
-        fontSize: 12,
-    },
-    heading: {
-        marginTop: 8,
-        color: "#EFF4FD",
-        fontSize: 33,
-        lineHeight: 38,
-        fontWeight: "800",
-        maxWidth: 280,
-    },
-    bellWrap: {
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.15)",
-        alignItems: "center",
-        justifyContent: "center",
-        marginTop: 4,
-    },
-    filtersRow: {
-        flexDirection: "row",
-        gap: 10,
-        marginTop: 14,
-        marginBottom: 12,
-    },
-    filterChipActive: {
-        backgroundColor: "#F7C72C",
-        color: "#202020",
-        fontWeight: "800",
-        fontSize: 11,
-        textTransform: "uppercase",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-    },
-    filterChip: {
-        color: "#A1B2CB",
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.12)",
-        fontSize: 11,
-        textTransform: "uppercase",
-        fontWeight: "700",
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 999,
-    },
-    listContent: {
-        paddingBottom: 20,
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: {
+            flex: 1,
+            backgroundColor: palette.pageTop,
+        },
+        screen: {
+            flex: 1,
+            paddingHorizontal: 16,
+        },
+        topRow: {
+            marginTop: 4,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+        },
+        greeting: {
+            color: palette.emerald,
+            fontSize: 13,
+            fontWeight: "800",
+        },
+        errorText: {
+            color: palette.danger,
+            marginBottom: 10,
+            fontSize: 12,
+        },
+        heading: {
+            marginTop: 8,
+            color: palette.textPrimary,
+            fontSize: 33,
+            lineHeight: 38,
+            fontWeight: "800",
+            maxWidth: 280,
+        },
+        bellWrap: {
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            alignItems: "center",
+            justifyContent: "center",
+            marginTop: 4,
+        },
+        filtersRow: {
+            flexDirection: "row",
+            gap: 10,
+            marginTop: 14,
+            marginBottom: 12,
+        },
+        filterChipActive: {
+            backgroundColor: palette.oceanBlue,
+            color: palette.iceWhite,
+            fontWeight: "800",
+            fontSize: 11,
+            textTransform: "uppercase",
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 999,
+        },
+        filterChip: {
+            color: palette.textSecondary,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            fontSize: 11,
+            textTransform: "uppercase",
+            fontWeight: "700",
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 999,
+        },
+        listContent: {
+            paddingBottom: 20,
+        },
+    });
+}

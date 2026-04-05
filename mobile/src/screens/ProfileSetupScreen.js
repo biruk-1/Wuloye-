@@ -6,6 +6,7 @@ import Loader from "../components/Loader";
 import { getProfile, updateProfile } from "../api/profileApi";
 import { useAuth } from "../context/AuthContext";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 const INTERESTS = [
     "gym",
@@ -45,6 +46,9 @@ function SelectChip({ label, selected, onPress }) {
 }
 
 export default function ProfileSetupScreen({ navigation }) {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const { refreshProfile } = useAuth();
     const [interests, setInterests] = useState([]);
     const [budget, setBudget] = useState("medium");
@@ -138,7 +142,7 @@ export default function ProfileSetupScreen({ navigation }) {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0B152A", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -211,149 +215,166 @@ export default function ProfileSetupScreen({ navigation }) {
                 <Pressable
                     onPress={saveAndContinue}
                     disabled={!isValid || saving}
-                    style={[styles.cta, !isValid && styles.ctaDisabled]}
+                    style={[styles.ctaWrap, !isValid && styles.ctaDisabled]}
                 >
-                    <Text style={styles.ctaText}>
-                        {saving ? "Saving..." : "Continue"}
-                    </Text>
+                    <LinearGradient
+                        colors={gradients.primaryButton}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.cta}
+                    >
+                        <Text style={styles.ctaText}>
+                            {saving ? "Saving..." : "Continue"}
+                        </Text>
+                    </LinearGradient>
                 </Pressable>
             </LinearGradient>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: {
-        flex: 1,
-        backgroundColor: "#050A17",
-    },
-    screen: {
-        flex: 1,
-        paddingHorizontal: 20,
-    },
-    scrollContent: {
-        paddingBottom: 120,
-    },
-    step: {
-        marginTop: 6,
-        color: "#A4B2C8",
-        fontSize: 11,
-        fontWeight: "800",
-        textTransform: "uppercase",
-        letterSpacing: 1.2,
-    },
-    progressTrack: {
-        marginTop: 8,
-        height: 4,
-        borderRadius: 999,
-        backgroundColor: "rgba(255,255,255,0.13)",
-        overflow: "hidden",
-    },
-    progressFill: {
-        width: "50%",
-        height: "100%",
-        borderRadius: 999,
-        backgroundColor: "#F7C72C",
-    },
-    title: {
-        marginTop: 20,
-        color: "#F1F5FB",
-        fontSize: 38,
-        lineHeight: 42,
-        fontWeight: "800",
-    },
-    subtitle: {
-        marginTop: 10,
-        color: "#8DA2C1",
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    section: {
-        marginTop: 22,
-        marginBottom: 10,
-        color: "#7F93B4",
-        fontSize: 11,
-        letterSpacing: 1.1,
-        textTransform: "uppercase",
-        fontWeight: "800",
-    },
-    errorText: {
-        color: "#F7B2B2",
-        fontSize: 12,
-        marginBottom: 10,
-    },
-    chipsWrap: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8,
-    },
-    chip: {
-        borderRadius: 999,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.14)",
-        backgroundColor: "rgba(255,255,255,0.06)",
-        paddingHorizontal: 13,
-        paddingVertical: 8,
-    },
-    chipSelected: {
-        borderColor: "#F7C72C",
-        backgroundColor: "rgba(247,199,44,0.2)",
-    },
-    chipText: {
-        color: "#B3C1D8",
-        fontSize: 12,
-        fontWeight: "700",
-    },
-    chipTextSelected: {
-        color: "#FCE68A",
-    },
-    optionStack: {
-        gap: 10,
-    },
-    optionCard: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.12)",
-        backgroundColor: "rgba(255,255,255,0.04)",
-        padding: 14,
-    },
-    optionCardSelected: {
-        borderColor: "#F7C72C",
-        backgroundColor: "rgba(247,199,44,0.14)",
-    },
-    optionTitle: {
-        color: "#EDF3FD",
-        fontSize: 16,
-        fontWeight: "800",
-    },
-    optionSubtitle: {
-        marginTop: 4,
-        color: "#9BB0CC",
-        fontSize: 12,
-    },
-    inlineOptions: {
-        flexDirection: "row",
-        flexWrap: "wrap",
-        gap: 8,
-    },
-    cta: {
-        position: "absolute",
-        left: 20,
-        right: 20,
-        bottom: 26,
-        backgroundColor: "#F7C72C",
-        height: 54,
-        borderRadius: 16,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    ctaDisabled: {
-        opacity: 0.5,
-    },
-    ctaText: {
-        color: "#1E1E1E",
-        fontWeight: "800",
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: {
+            flex: 1,
+            backgroundColor: palette.pageTop,
+        },
+        screen: {
+            flex: 1,
+            paddingHorizontal: 20,
+        },
+        scrollContent: {
+            paddingBottom: 120,
+        },
+        step: {
+            marginTop: 6,
+            color: palette.textMuted,
+            fontSize: 11,
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: 1.2,
+        },
+        progressTrack: {
+            marginTop: 8,
+            height: 4,
+            borderRadius: 999,
+            backgroundColor: "rgba(10, 108, 168, 0.2)",
+            overflow: "hidden",
+        },
+        progressFill: {
+            width: "50%",
+            height: "100%",
+            borderRadius: 999,
+            backgroundColor: palette.oceanBlue,
+        },
+        title: {
+            marginTop: 20,
+            color: palette.textPrimary,
+            fontSize: 38,
+            lineHeight: 42,
+            fontWeight: "800",
+        },
+        subtitle: {
+            marginTop: 10,
+            color: palette.textSecondary,
+            fontSize: 15,
+            lineHeight: 22,
+        },
+        section: {
+            marginTop: 22,
+            marginBottom: 10,
+            color: palette.textMuted,
+            fontSize: 11,
+            letterSpacing: 1.1,
+            textTransform: "uppercase",
+            fontWeight: "800",
+        },
+        errorText: {
+            color: palette.danger,
+            fontSize: 12,
+            marginBottom: 10,
+        },
+        chipsWrap: {
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 8,
+        },
+        chip: {
+            borderRadius: 999,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            paddingHorizontal: 13,
+            paddingVertical: 8,
+        },
+        chipSelected: {
+            borderColor: palette.oceanBlue,
+            backgroundColor: "rgba(31, 159, 234, 0.18)",
+        },
+        chipText: {
+            color: palette.textSecondary,
+            fontSize: 12,
+            fontWeight: "700",
+        },
+        chipTextSelected: {
+            color: palette.deepBlue,
+        },
+        optionStack: {
+            gap: 10,
+        },
+        optionCard: {
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            padding: 14,
+        },
+        optionCardSelected: {
+            borderColor: palette.emerald,
+            backgroundColor: "rgba(38, 201, 122, 0.15)",
+        },
+        optionTitle: {
+            color: palette.textPrimary,
+            fontSize: 16,
+            fontWeight: "800",
+        },
+        optionSubtitle: {
+            marginTop: 4,
+            color: palette.textSecondary,
+            fontSize: 12,
+        },
+        inlineOptions: {
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: 8,
+        },
+        ctaWrap: {
+            position: "absolute",
+            left: 20,
+            right: 20,
+            bottom: 26,
+            borderRadius: 16,
+            overflow: "hidden",
+        },
+        cta: {
+            height: 54,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#2FAAFF",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.24,
+            shadowRadius: 14,
+            elevation: 7,
+        },
+        ctaDisabled: {
+            opacity: 0.5,
+        },
+        ctaText: {
+            color: palette.iceWhite,
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+        },
+    });
+}

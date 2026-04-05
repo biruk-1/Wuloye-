@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import Loader from "../components/Loader";
 import { createRoutine, deleteRoutine, getRoutines } from "../api/routineApi";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 const ROUTINE_SAMPLES = [
     {
@@ -40,6 +41,9 @@ function formatLabel(value) {
 }
 
 export default function RoutineBuilderScreen({ navigation }) {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const [routines, setRoutines] = useState([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -115,7 +119,7 @@ export default function RoutineBuilderScreen({ navigation }) {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0A1328", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <Text style={styles.step}>Step 2 of 2</Text>
@@ -155,146 +159,181 @@ export default function RoutineBuilderScreen({ navigation }) {
                                 <Ionicons
                                     name="trash-outline"
                                     size={18}
-                                    color="#9FB0C9"
+                                    color={palette.deepBlue}
                                 />
                             </Pressable>
                         </View>
                     ))}
                 </ScrollView>
 
-                <Pressable style={styles.fab} onPress={addRoutine}>
-                    <Ionicons name="add" size={22} color="#1D1D1D" />
+                <Pressable style={styles.fabWrap} onPress={addRoutine}>
+                    <LinearGradient
+                        colors={gradients.primaryButton}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.fab}
+                    >
+                        <Ionicons
+                            name="add"
+                            size={22}
+                            color={palette.iceWhite}
+                        />
+                    </LinearGradient>
                 </Pressable>
 
                 <Pressable
-                    style={styles.cta}
+                    style={styles.ctaWrap}
                     onPress={() => navigation.replace("MainTabs")}
                 >
-                    <Text style={styles.ctaText}>
-                        Save all & start exploring
-                    </Text>
-                    <Ionicons name="arrow-forward" size={16} color="#1E1E1E" />
+                    <LinearGradient
+                        colors={gradients.primaryButtonMint}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.cta}
+                    >
+                        <Text style={styles.ctaText}>
+                            Save all & start exploring
+                        </Text>
+                        <Ionicons
+                            name="arrow-forward"
+                            size={16}
+                            color={palette.iceWhite}
+                        />
+                    </LinearGradient>
                 </Pressable>
             </LinearGradient>
         </SafeAreaView>
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: {
-        flex: 1,
-        backgroundColor: "#050A17",
-    },
-    screen: {
-        flex: 1,
-        paddingHorizontal: 20,
-        paddingTop: 8,
-    },
-    step: {
-        color: "#A8B6CB",
-        fontSize: 11,
-        letterSpacing: 1.2,
-        textTransform: "uppercase",
-        fontWeight: "800",
-    },
-    progressTrack: {
-        marginTop: 8,
-        height: 4,
-        borderRadius: 999,
-        backgroundColor: "rgba(255,255,255,0.13)",
-        overflow: "hidden",
-    },
-    progressFill: {
-        width: "100%",
-        height: "100%",
-        backgroundColor: "#F7C72C",
-    },
-    title: {
-        marginTop: 18,
-        color: "#F0F5FD",
-        fontSize: 42,
-        lineHeight: 45,
-        fontWeight: "800",
-    },
-    subtitle: {
-        marginTop: 10,
-        color: "#93A8C6",
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    errorText: {
-        marginTop: 10,
-        color: "#F7B2B2",
-        fontSize: 12,
-    },
-    list: {
-        marginTop: 16,
-    },
-    listContent: {
-        paddingBottom: 120,
-        gap: 10,
-    },
-    card: {
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.11)",
-        backgroundColor: "rgba(255,255,255,0.04)",
-        padding: 14,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    cardTitle: {
-        color: "#DAE4F5",
-        fontSize: 12,
-        textTransform: "uppercase",
-        letterSpacing: 0.8,
-        fontWeight: "700",
-    },
-    cardActivity: {
-        marginTop: 6,
-        color: "#F7C72C",
-        fontSize: 18,
-        fontWeight: "800",
-    },
-    cardMeta: {
-        marginTop: 4,
-        color: "#9AAECB",
-        fontSize: 12,
-    },
-    fab: {
-        position: "absolute",
-        right: 20,
-        bottom: 94,
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: "#F7C72C",
-        alignItems: "center",
-        justifyContent: "center",
-        shadowColor: "#F7C72C",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.34,
-        shadowRadius: 14,
-        elevation: 6,
-    },
-    cta: {
-        position: "absolute",
-        left: 20,
-        right: 20,
-        bottom: 24,
-        height: 54,
-        borderRadius: 16,
-        backgroundColor: "#F7C72C",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 8,
-    },
-    ctaText: {
-        color: "#202020",
-        fontWeight: "800",
-        textTransform: "uppercase",
-        letterSpacing: 0.3,
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: {
+            flex: 1,
+            backgroundColor: palette.pageTop,
+        },
+        screen: {
+            flex: 1,
+            paddingHorizontal: 20,
+            paddingTop: 8,
+        },
+        step: {
+            color: palette.textMuted,
+            fontSize: 11,
+            letterSpacing: 1.2,
+            textTransform: "uppercase",
+            fontWeight: "800",
+        },
+        progressTrack: {
+            marginTop: 8,
+            height: 4,
+            borderRadius: 999,
+            backgroundColor: "rgba(10, 108, 168, 0.2)",
+            overflow: "hidden",
+        },
+        progressFill: {
+            width: "100%",
+            height: "100%",
+            backgroundColor: palette.oceanBlue,
+        },
+        title: {
+            marginTop: 18,
+            color: palette.textPrimary,
+            fontSize: 42,
+            lineHeight: 45,
+            fontWeight: "800",
+        },
+        subtitle: {
+            marginTop: 10,
+            color: palette.textSecondary,
+            fontSize: 15,
+            lineHeight: 22,
+        },
+        errorText: {
+            marginTop: 10,
+            color: palette.danger,
+            fontSize: 12,
+        },
+        list: {
+            marginTop: 16,
+        },
+        listContent: {
+            paddingBottom: 120,
+            gap: 10,
+        },
+        card: {
+            borderRadius: 18,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+            padding: 14,
+            flexDirection: "row",
+            justifyContent: "space-between",
+            alignItems: "center",
+        },
+        cardTitle: {
+            color: palette.textMuted,
+            fontSize: 12,
+            textTransform: "uppercase",
+            letterSpacing: 0.8,
+            fontWeight: "700",
+        },
+        cardActivity: {
+            marginTop: 6,
+            color: palette.oceanBlue,
+            fontSize: 18,
+            fontWeight: "800",
+        },
+        cardMeta: {
+            marginTop: 4,
+            color: palette.textSecondary,
+            fontSize: 12,
+        },
+        fabWrap: {
+            position: "absolute",
+            right: 20,
+            bottom: 94,
+            borderRadius: 25,
+            overflow: "hidden",
+        },
+        fab: {
+            width: 50,
+            height: 50,
+            borderRadius: 25,
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#2A9DE5",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.34,
+            shadowRadius: 14,
+            elevation: 6,
+        },
+        ctaWrap: {
+            position: "absolute",
+            left: 20,
+            right: 20,
+            bottom: 24,
+            borderRadius: 16,
+            overflow: "hidden",
+        },
+        cta: {
+            height: 54,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 8,
+            shadowColor: "#2DAAFF",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.24,
+            shadowRadius: 14,
+            elevation: 7,
+        },
+        ctaText: {
+            color: palette.iceWhite,
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: 0.3,
+        },
+    });
+}
