@@ -52,7 +52,7 @@ function makeGradients(palette, mode) {
                 palette.pageBottom,
             ],
             card: ["#10223D", "#0D1B31", "#112A3A"],
-            primaryButton: ["#7AD9FF", "#3DAFFF", "#238EFF"],
+            primaryButton: ["#76D7FF", "#3DAEFF", "#20C97D"],
             primaryButtonMint: ["#74D3FF", "#33A7FF", "#1CC87D"],
             navBar: ["rgba(16,33,58,0.95)", "rgba(12,27,48,0.95)"],
             navActivePill: ["#7AD8FF", "#2FAAFF"],
@@ -62,7 +62,7 @@ function makeGradients(palette, mode) {
     return {
         appBackground: [palette.pageTop, palette.pageMid, palette.pageBottom],
         card: ["#FFFFFF", "#EAF6FF", "#DFF4EC"],
-        primaryButton: ["#83DAFF", "#4CBFFF", "#2A93FF"],
+        primaryButton: ["#82DBFF", "#46B5FF", "#22C97C"],
         primaryButtonMint: ["#83DAFF", "#4BB8FF", "#29C67A"],
         navBar: ["rgba(255,255,255,0.95)", "rgba(231,248,255,0.92)"],
         navActivePill: ["#7AD8FF", "#2FAAFF"],

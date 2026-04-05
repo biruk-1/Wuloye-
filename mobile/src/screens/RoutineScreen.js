@@ -200,7 +200,18 @@ export default function RoutineScreen() {
                 )}
 
                 <Pressable style={styles.fab} onPress={handleAddRoutine}>
-                    <Ionicons name="add" size={24} color={palette.iceWhite} />
+                    <LinearGradient
+                        colors={gradients.primaryButtonMint}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.fabFill}
+                    >
+                        <Ionicons
+                            name="add"
+                            size={24}
+                            color={palette.iceWhite}
+                        />
+                    </LinearGradient>
                 </Pressable>
             </LinearGradient>
         </SafeAreaView>
@@ -327,7 +338,20 @@ function createStyles(palette) {
             width: 52,
             height: 52,
             borderRadius: 26,
-            backgroundColor: palette.oceanBlue,
+            overflow: "hidden",
+            backgroundColor: "transparent",
+            alignItems: "center",
+            justifyContent: "center",
+            shadowColor: "#269AE3",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.25,
+            shadowRadius: 12,
+            elevation: 8,
+        },
+        fabFill: {
+            width: "100%",
+            height: "100%",
+            borderRadius: 26,
             alignItems: "center",
             justifyContent: "center",
             shadowColor: "#269AE3",
