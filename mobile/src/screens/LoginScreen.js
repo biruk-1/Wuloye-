@@ -285,7 +285,7 @@ export default function LoginScreen() {
                             <LinearGradient
                                 colors={
                                     isDark
-                                        ? ["#12263E", "#0E1C30", "#143149"]
+                                        ? ["#132741", "#0E1D32", "#143047"]
                                         : ["#FFFFFF", "#EAF7FF", "#DFF7EA"]
                                 }
                                 style={styles.visualCard}
@@ -556,7 +556,7 @@ function createStyles(palette, isDark) {
             letterSpacing: 0.5,
             fontSize: 14,
             textShadowColor: isDark
-                ? "rgba(8,18,33,0.45)"
+                ? "rgba(6,14,28,0.48)"
                 : "rgba(255,255,255,0.28)",
             textShadowOffset: { width: 0, height: 1 },
             textShadowRadius: 1,
