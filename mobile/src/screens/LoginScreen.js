@@ -29,7 +29,8 @@ function AuthButton({
     disabled = false,
     palette,
     gradients,
-    styles,
+    /** Avoid prop name `styles` — Hermes can throw "Property 'styles' doesn't exist". */
+    styleSheet,
 }) {
     if (primary) {
         return (
@@ -37,15 +38,15 @@ function AuthButton({
                 onPress={onPress}
                 disabled={disabled}
                 style={[
-                    styles.primaryButtonWrap,
-                    disabled && styles.buttonDisabled,
+                    styleSheet.primaryButtonWrap,
+                    disabled && styleSheet.buttonDisabled,
                 ]}
             >
                 <LinearGradient
                     colors={gradients.primaryButton}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 0 }}
-                    style={styles.primaryButton}
+                    style={styleSheet.primaryButton}
                 >
                     {icon ? (
                         <Ionicons
@@ -54,7 +55,12 @@ function AuthButton({
                             color={palette.iceWhite}
                         />
                     ) : null}
-                    <Text style={[styles.buttonText, styles.primaryButtonText]}>
+                    <Text
+                        style={[
+                            styleSheet.buttonText,
+                            styleSheet.primaryButtonText,
+                        ]}
+                    >
                         {label}
                     </Text>
                 </LinearGradient>
@@ -66,12 +72,15 @@ function AuthButton({
         <Pressable
             onPress={onPress}
             disabled={disabled}
-            style={[styles.buttonBase, disabled && styles.buttonDisabled]}
+            style={[
+                styleSheet.buttonBase,
+                disabled && styleSheet.buttonDisabled,
+            ]}
         >
             {icon ? (
                 <Ionicons name={icon} size={17} color={palette.textPrimary} />
             ) : null}
-            <Text style={styles.buttonText}>{label}</Text>
+            <Text style={styleSheet.buttonText}>{label}</Text>
         </Pressable>
     );
 }
@@ -82,7 +91,7 @@ function GoogleAuthBlock({
     signInWithGoogleIdToken,
     palette,
     gradients,
-    styles,
+    styleSheet,
 }) {
     const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
         webClientId: GOOGLE_WEB_CLIENT_ID,
@@ -129,7 +138,7 @@ function GoogleAuthBlock({
             disabled={disabled || !request}
             palette={palette}
             gradients={gradients}
-            styles={styles}
+            styleSheet={styles}
             onPress={() => {
                 promptAsync().catch((error) => {
                     Alert.alert(
@@ -300,7 +309,7 @@ export default function LoginScreen() {
                                 }
                                 palette={palette}
                                 gradients={gradients}
-                                styles={styles}
+                                styleSheet={styles}
                             />
                         ) : (
                             <Text style={styles.hintText}>
@@ -316,7 +325,7 @@ export default function LoginScreen() {
                                 disabled={submitting}
                                 palette={palette}
                                 gradients={gradients}
-                                styles={styles}
+                                styleSheet={styles}
                                 onPress={onApplePress}
                             />
                         ) : null}
@@ -388,7 +397,7 @@ export default function LoginScreen() {
                             disabled={submitting}
                             palette={palette}
                             gradients={gradients}
-                            styles={styles}
+                            styleSheet={styles}
                             onPress={submitEmailAuth}
                         />
 

@@ -30,14 +30,20 @@ function formatLabel(value) {
     return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function SelectChip({ label, selected, onPress }) {
+function SelectChip({ label, selected, onPress, styleSheet }) {
     return (
         <Pressable
             onPress={onPress}
-            style={[styles.chip, selected && styles.chipSelected]}
+            style={[
+                styleSheet.chip,
+                selected && styleSheet.chipSelected,
+            ]}
         >
             <Text
-                style={[styles.chipText, selected && styles.chipTextSelected]}
+                style={[
+                    styleSheet.chipText,
+                    selected && styleSheet.chipTextSelected,
+                ]}
             >
                 {label}
             </Text>
@@ -169,6 +175,7 @@ export default function ProfileSetupScreen({ navigation }) {
                                 label={formatLabel(item)}
                                 selected={interests.includes(item)}
                                 onPress={() => toggleInterest(item)}
+                                styleSheet={styles}
                             />
                         ))}
                     </View>
@@ -207,6 +214,7 @@ export default function ProfileSetupScreen({ navigation }) {
                                 label={formatLabel(item)}
                                 selected={locationPreference === item}
                                 onPress={() => setLocationPreference(item)}
+                                styleSheet={styles}
                             />
                         ))}
                     </View>
