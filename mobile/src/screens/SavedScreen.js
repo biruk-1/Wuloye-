@@ -8,6 +8,7 @@ import Loader from "../components/Loader";
 import { createInteraction, getInteractions } from "../api/interactionApi";
 import { INTERACTION_TYPES } from "../utils/constants";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 function asSavedPlace(interaction, index) {
     const place = interaction?.metadata?.place;
@@ -27,9 +28,13 @@ function asSavedPlace(interaction, index) {
 }
 
 export default function SavedScreen({ navigation }) {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [saved, setSaved] = useState([]);
+    const [refreshing, setRefreshing] = useState(false);
 
     const loadSaved = useCallback(async () => {
         try {
@@ -68,6 +73,15 @@ export default function SavedScreen({ navigation }) {
         loadSaved();
     }, [loadSaved]);
 
+    async function handleRefresh() {
+        try {
+            setRefreshing(true);
+            await loadSaved();
+        } finally {
+            setRefreshing(false);
+        }
+    }
+
     async function handleDismiss(place) {
         try {
             await createInteraction({
@@ -91,7 +105,7 @@ export default function SavedScreen({ navigation }) {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0B1529", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <Text style={styles.title}>Saved Places</Text>
@@ -108,6 +122,8 @@ export default function SavedScreen({ navigation }) {
                     <FlatList
                         data={items}
                         keyExtractor={(item) => item.id}
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
                         contentContainerStyle={styles.list}
                         renderItem={({ item }) => (
                             <PlaceCard
@@ -127,21 +143,23 @@ export default function SavedScreen({ navigation }) {
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: "#050A17" },
-    screen: { flex: 1, paddingHorizontal: 16 },
-    title: {
-        color: "#F0F5FD",
-        fontSize: 31,
-        fontWeight: "800",
-        marginTop: 4,
-    },
-    errorText: {
-        color: "#F7B2B2",
-        marginTop: 8,
-    },
-    list: {
-        marginTop: 14,
-        paddingBottom: 16,
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: { flex: 1, backgroundColor: palette.pageTop },
+        screen: { flex: 1, paddingHorizontal: 16 },
+        title: {
+            color: palette.textPrimary,
+            fontSize: 31,
+            fontWeight: "800",
+            marginTop: 4,
+        },
+        errorText: {
+            color: palette.danger,
+            marginTop: 8,
+        },
+        list: {
+            marginTop: 14,
+            paddingBottom: 16,
+        },
+    });
+}
