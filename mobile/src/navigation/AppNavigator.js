@@ -30,34 +30,35 @@ function ProfileErrorScreen({
     message,
     palette,
     gradients,
-    styles,
+    /** Not named `styles` — Hermes can throw "Property 'styles' doesn't exist". */
+    styleSheet,
 }) {
     return (
-        <View style={styles.container}>
-            <View style={styles.iconWrap}>
+        <View style={styleSheet.container}>
+            <View style={styleSheet.iconWrap}>
                 <Ionicons
                     name="cloud-offline-outline"
                     size={46}
                     color={palette.oceanBlue}
                 />
             </View>
-            <Text style={styles.title}>Could not connect</Text>
-            <Text style={styles.body}>
+            <Text style={styleSheet.title}>Could not connect</Text>
+            <Text style={styleSheet.body}>
                 {message ??
                     "We couldn't reach the server. Check your connection and try again."}
             </Text>
-            <Pressable style={styles.retryBtnWrap} onPress={onRetry}>
+            <Pressable style={styleSheet.retryBtnWrap} onPress={onRetry}>
                 <LinearGradient
                     colors={gradients.primaryButtonMint}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
-                    style={styles.retryBtn}
+                    style={styleSheet.retryBtn}
                 >
-                    <Text style={styles.retryText}>Retry</Text>
+                    <Text style={styleSheet.retryText}>Retry</Text>
                 </LinearGradient>
             </Pressable>
-            <Pressable style={styles.signOutBtn} onPress={onSignOut}>
-                <Text style={styles.signOutText}>Sign out</Text>
+            <Pressable style={styleSheet.signOutBtn} onPress={onSignOut}>
+                <Text style={styleSheet.signOutText}>Sign out</Text>
             </Pressable>
         </View>
     );
@@ -100,7 +101,7 @@ export default function AppNavigator() {
                 onSignOut={clearAuth}
                 palette={palette}
                 gradients={gradients}
-                styles={errStyles}
+                styleSheet={errStyles}
             />
         );
     }
