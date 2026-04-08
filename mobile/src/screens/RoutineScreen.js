@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
     Alert,
     FlatList,
+    Modal,
     Pressable,
     RefreshControl,
     ScrollView,
@@ -36,29 +37,44 @@ import { getTodaysScheduleRows } from "../utils/todaysSchedule";
 import { getApiErrorMessage, unwrapApiData } from "../utils/api";
 import { useAppTheme } from "../context/ThemeContext";
 
-const ROUTINE_SAMPLES = [
-    {
-        weekday: "tuesday",
-        timeOfDay: "morning",
-        activityType: "gym",
-        locationPreference: "indoor",
-        budgetRange: "medium",
-    },
-    {
-        weekday: "thursday",
-        timeOfDay: "evening",
-        activityType: "coffee",
-        locationPreference: "any",
-        budgetRange: "low",
-    },
-    {
-        weekday: "saturday",
-        timeOfDay: "afternoon",
-        activityType: "restaurant",
-        locationPreference: "outdoor",
-        budgetRange: "high",
-    },
+const WEEKDAYS = [
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
 ];
+
+const TIME_OF_DAY = ["morning", "afternoon", "evening"];
+
+const ACTIVITY_TYPES = [
+    "gym",
+    "coffee",
+    "reading",
+    "hiking",
+    "shopping",
+    "restaurant",
+    "study",
+    "work",
+    "walk",
+    "yoga",
+    "cinema",
+    "social",
+];
+
+const LOCATION_PREF = ["indoor", "outdoor", "any"];
+
+const BUDGET_RANGES = ["low", "medium", "high"];
+
+const DEFAULT_ROUTINE_DRAFT = {
+    weekday: "monday",
+    timeOfDay: "morning",
+    activityType: "gym",
+    locationPreference: "any",
+    budgetRange: "medium",
+};
 
 const TABS = [
     { key: "schedule", label: "Schedule" },
@@ -74,6 +90,28 @@ function formatLabel(value) {
     return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function FieldRow({ label, valueLabel, onPress, styles, chevronColor }) {
+    return (
+        <Pressable
+            onPress={onPress}
+            style={({ pressed }) => [
+                styles.fieldRow,
+                pressed && styles.fieldRowPressed,
+            ]}
+        >
+            <Text style={styles.fieldLabel}>{label}</Text>
+            <View style={styles.fieldRowRight}>
+                <Text style={styles.fieldValue}>{valueLabel}</Text>
+                <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={chevronColor}
+                />
+            </View>
+        </Pressable>
+    );
+}
+
 /** MainTabs floating bar: `hostWrap` uses bottom 12 + height 94 */
 const TAB_BAR_FLOAT_HEIGHT = 12 + 94;
 const FAB_CLEAR_GAP = 12;
@@ -87,17 +125,11 @@ export default function RoutineScreen() {
     /** Sit above the custom tab bar (coordinates are inside SafeAreaView). */
     const fabBottom = useMemo(
         () =>
-            Math.max(
-                14,
-                TAB_BAR_FLOAT_HEIGHT + FAB_CLEAR_GAP - insets.bottom,
-            ),
+            Math.max(14, TAB_BAR_FLOAT_HEIGHT + FAB_CLEAR_GAP - insets.bottom),
         [insets.bottom],
     );
 
-    const scrollBottomInset = useMemo(
-        () => fabBottom + 56,
-        [fabBottom],
-    );
+    const scrollBottomInset = useMemo(() => fabBottom + 56, [fabBottom]);
 
     const [tab, setTab] = useState("schedule");
 
@@ -109,6 +141,9 @@ export default function RoutineScreen() {
     const [error, setError] = useState("");
     const [refreshing, setRefreshing] = useState(false);
     const [now, setNow] = useState(() => new Date());
+    const [modalVisible, setModalVisible] = useState(false);
+    const [draft, setDraft] = useState(DEFAULT_ROUTINE_DRAFT);
+    const [picker, setPicker] = useState(null);
 
     const fetchAll = useCallback(async () => {
         try {
@@ -176,20 +211,23 @@ export default function RoutineScreen() {
             return {
                 eyebrow: "Today",
                 title: "Your schedule",
-                subtitle: "Tap a block for places, meals, and filters for that activity.",
+                subtitle:
+                    "Tap a block for places, meals, and filters for that activity.",
             };
         }
         if (tab === "recommendations") {
             return {
                 eyebrow: "For you",
                 title: "Spot recommendations",
-                subtitle: "Places aligned with your profile — open a card for details.",
+                subtitle:
+                    "Places aligned with your profile — open a card for details.",
             };
         }
         return {
             eyebrow: "Weekly planner",
             title: "My routines",
-            subtitle: "Stay consistent — tap a routine for ideas, or add with + .",
+            subtitle:
+                "Stay consistent — tap a routine for ideas, or add with + .",
         };
     }, [tab]);
 
@@ -205,10 +243,91 @@ export default function RoutineScreen() {
         navigation.navigate("ActivityRecommendations", payload);
     }
 
-    const sample = useMemo(
-        () => ROUTINE_SAMPLES[routines.length % ROUTINE_SAMPLES.length],
-        [routines.length],
-    );
+    function openAddRoutineModal() {
+        setDraft({ ...DEFAULT_ROUTINE_DRAFT });
+        setPicker(null);
+        setModalVisible(true);
+    }
+
+    function closeAddRoutineModal() {
+        setModalVisible(false);
+        setPicker(null);
+    }
+
+    function renderPickerOptions() {
+        const map = {
+            weekday: WEEKDAYS,
+            timeOfDay: TIME_OF_DAY,
+            activityType: ACTIVITY_TYPES,
+            locationPreference: LOCATION_PREF,
+            budgetRange: BUDGET_RANGES,
+        };
+        const list = map[picker] ?? [];
+        const titles = {
+            weekday: "Day of week",
+            timeOfDay: "Time of day",
+            activityType: "Activity",
+            locationPreference: "Place vibe",
+            budgetRange: "Budget for this slot",
+        };
+
+        return (
+            <View style={styles.pickerSheet}>
+                <View style={styles.pickerHeader}>
+                    <Pressable
+                        onPress={() => setPicker(null)}
+                        style={styles.pickerBack}
+                    >
+                        <Ionicons
+                            name="arrow-back"
+                            size={22}
+                            color={palette.deepBlue}
+                        />
+                        <Text style={styles.pickerBackText}>Back</Text>
+                    </Pressable>
+                    <Text style={styles.pickerTitle}>{titles[picker]}</Text>
+                </View>
+                <ScrollView
+                    style={styles.pickerScroll}
+                    contentContainerStyle={styles.pickerScrollContent}
+                    showsVerticalScrollIndicator={false}
+                >
+                    {list.map((opt) => (
+                        <Pressable
+                            key={opt}
+                            onPress={() => {
+                                setDraft((d) => ({ ...d, [picker]: opt }));
+                                setPicker(null);
+                            }}
+                            style={({ pressed }) => [
+                                styles.pickerOption,
+                                draft[picker] === opt &&
+                                    styles.pickerOptionSelected,
+                                pressed && styles.pickerOptionPressed,
+                            ]}
+                        >
+                            <Text
+                                style={[
+                                    styles.pickerOptionText,
+                                    draft[picker] === opt &&
+                                        styles.pickerOptionTextSelected,
+                                ]}
+                            >
+                                {formatLabel(opt)}
+                            </Text>
+                            {draft[picker] === opt ? (
+                                <Ionicons
+                                    name="checkmark-circle"
+                                    size={22}
+                                    color={palette.emerald}
+                                />
+                            ) : null}
+                        </Pressable>
+                    ))}
+                </ScrollView>
+            </View>
+        );
+    }
 
     async function handleAddRoutine() {
         if (busy) {
@@ -218,11 +337,12 @@ export default function RoutineScreen() {
         try {
             setBusy(true);
             setError("");
-            const envelope = await createRoutine(sample);
+            const envelope = await createRoutine(draft);
             const created = unwrapApiData(envelope, null);
             if (created) {
                 setRoutines((current) => [created, ...current]);
             }
+            closeAddRoutineModal();
         } catch (err) {
             Alert.alert("Unable to add routine", getApiErrorMessage(err));
         } finally {
@@ -296,7 +416,9 @@ export default function RoutineScreen() {
                                 style={({ pressed }) => [
                                     styles.segmentCell,
                                     active && styles.segmentCellActive,
-                                    pressed && !active && styles.segmentCellPressed,
+                                    pressed &&
+                                        !active &&
+                                        styles.segmentCellPressed,
                                 ]}
                             >
                                 <Text
@@ -375,7 +497,8 @@ export default function RoutineScreen() {
                                         }
                                         style={({ pressed }) => [
                                             styles.scheduleRow,
-                                            pressed && styles.scheduleRowPressed,
+                                            pressed &&
+                                                styles.scheduleRowPressed,
                                         ]}
                                     >
                                         <View
@@ -393,16 +516,22 @@ export default function RoutineScreen() {
                                             />
                                         </View>
                                         <View style={styles.scheduleRowText}>
-                                            <Text style={styles.scheduleRowTitle}>
+                                            <Text
+                                                style={styles.scheduleRowTitle}
+                                            >
                                                 {row.title}
                                             </Text>
-                                            <View style={styles.scheduleTimeRow}>
+                                            <View
+                                                style={styles.scheduleTimeRow}
+                                            >
                                                 <Ionicons
                                                     name="time-outline"
                                                     size={14}
                                                     color={palette.textMuted}
                                                 />
-                                                <Text style={styles.scheduleTime}>
+                                                <Text
+                                                    style={styles.scheduleTime}
+                                                >
                                                     {row.timeLabel}
                                                 </Text>
                                             </View>
@@ -530,7 +659,7 @@ export default function RoutineScreen() {
                 {tab === "planner" ? (
                     <Pressable
                         style={[styles.fab, { bottom: fabBottom }]}
-                        onPress={handleAddRoutine}
+                        onPress={openAddRoutineModal}
                     >
                         <LinearGradient
                             colors={gradients.primaryButtonMint}
@@ -546,6 +675,130 @@ export default function RoutineScreen() {
                         </LinearGradient>
                     </Pressable>
                 ) : null}
+
+                <Modal
+                    visible={modalVisible}
+                    animationType="slide"
+                    transparent
+                    onRequestClose={closeAddRoutineModal}
+                >
+                    <View style={styles.modalOverlay}>
+                        <SafeAreaView style={styles.modalSafe}>
+                            <View style={styles.modalCard}>
+                                {!picker ? (
+                                    <>
+                                        <View style={styles.modalTopBar}>
+                                            <Text style={styles.modalTitle}>
+                                                New routine
+                                            </Text>
+                                            <Pressable
+                                                onPress={closeAddRoutineModal}
+                                                hitSlop={12}
+                                            >
+                                                <Ionicons
+                                                    name="close"
+                                                    size={26}
+                                                    color={
+                                                        palette.textSecondary
+                                                    }
+                                                />
+                                            </Pressable>
+                                        </View>
+                                        <Text style={styles.modalHint}>
+                                            Choose each field to create a
+                                            routine that matches your real
+                                            schedule.
+                                        </Text>
+
+                                        <FieldRow
+                                            label="Day"
+                                            valueLabel={formatLabel(
+                                                draft.weekday,
+                                            )}
+                                            onPress={() => setPicker("weekday")}
+                                            styles={styles}
+                                            chevronColor={palette.textMuted}
+                                        />
+                                        <FieldRow
+                                            label="Time"
+                                            valueLabel={formatLabel(
+                                                draft.timeOfDay,
+                                            )}
+                                            onPress={() =>
+                                                setPicker("timeOfDay")
+                                            }
+                                            styles={styles}
+                                            chevronColor={palette.textMuted}
+                                        />
+                                        <FieldRow
+                                            label="Activity"
+                                            valueLabel={formatLabel(
+                                                draft.activityType,
+                                            )}
+                                            onPress={() =>
+                                                setPicker("activityType")
+                                            }
+                                            styles={styles}
+                                            chevronColor={palette.textMuted}
+                                        />
+                                        <FieldRow
+                                            label="Place vibe"
+                                            valueLabel={formatLabel(
+                                                draft.locationPreference,
+                                            )}
+                                            onPress={() =>
+                                                setPicker("locationPreference")
+                                            }
+                                            styles={styles}
+                                            chevronColor={palette.textMuted}
+                                        />
+                                        <FieldRow
+                                            label="Budget"
+                                            valueLabel={formatLabel(
+                                                draft.budgetRange,
+                                            )}
+                                            onPress={() =>
+                                                setPicker("budgetRange")
+                                            }
+                                            styles={styles}
+                                            chevronColor={palette.textMuted}
+                                        />
+
+                                        <Pressable
+                                            style={styles.modalCtaWrap}
+                                            onPress={handleAddRoutine}
+                                            disabled={busy}
+                                        >
+                                            <LinearGradient
+                                                colors={
+                                                    gradients.primaryButtonMint
+                                                }
+                                                start={{ x: 0, y: 0 }}
+                                                end={{ x: 1, y: 1 }}
+                                                style={styles.modalCta}
+                                            >
+                                                <Text
+                                                    style={styles.modalCtaText}
+                                                >
+                                                    {busy
+                                                        ? "Adding..."
+                                                        : "Add routine"}
+                                                </Text>
+                                                <Ionicons
+                                                    name="add"
+                                                    size={17}
+                                                    color={palette.iceWhite}
+                                                />
+                                            </LinearGradient>
+                                        </Pressable>
+                                    </>
+                                ) : (
+                                    renderPickerOptions()
+                                )}
+                            </View>
+                        </SafeAreaView>
+                    </View>
+                </Modal>
             </LinearGradient>
         </SafeAreaView>
     );
@@ -810,6 +1063,154 @@ function createStyles(palette) {
             shadowOpacity: 0.25,
             shadowRadius: 12,
             elevation: 8,
+        },
+        modalOverlay: {
+            flex: 1,
+            backgroundColor: "rgba(5, 17, 30, 0.36)",
+            justifyContent: "flex-end",
+        },
+        modalSafe: {
+            width: "100%",
+        },
+        modalCard: {
+            backgroundColor: palette.surfaceStrong,
+            borderTopLeftRadius: 22,
+            borderTopRightRadius: 22,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            paddingHorizontal: 16,
+            paddingTop: 14,
+            paddingBottom: 16,
+            minHeight: 380,
+        },
+        modalTopBar: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+        },
+        modalTitle: {
+            color: palette.textPrimary,
+            fontSize: 22,
+            fontWeight: "900",
+        },
+        modalHint: {
+            marginTop: 6,
+            marginBottom: 10,
+            color: palette.textSecondary,
+            fontSize: 12,
+            lineHeight: 18,
+        },
+        fieldRow: {
+            borderWidth: 1,
+            borderColor: palette.borderSoft,
+            backgroundColor: palette.surface,
+            borderRadius: 14,
+            paddingHorizontal: 12,
+            paddingVertical: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 8,
+        },
+        fieldRowPressed: {
+            opacity: 0.9,
+        },
+        fieldLabel: {
+            color: palette.textMuted,
+            fontSize: 12,
+            textTransform: "uppercase",
+            letterSpacing: 0.6,
+            fontWeight: "700",
+        },
+        fieldRowRight: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+        },
+        fieldValue: {
+            color: palette.textPrimary,
+            fontSize: 14,
+            fontWeight: "700",
+        },
+        modalCtaWrap: {
+            marginTop: 14,
+            borderRadius: 14,
+            overflow: "hidden",
+        },
+        modalCta: {
+            height: 48,
+            borderRadius: 14,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 8,
+        },
+        modalCtaText: {
+            color: palette.iceWhite,
+            fontWeight: "800",
+            letterSpacing: 0.4,
+            textTransform: "uppercase",
+            fontSize: 13,
+        },
+        pickerSheet: {
+            flex: 1,
+            minHeight: 320,
+        },
+        pickerHeader: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 8,
+        },
+        pickerBack: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            paddingVertical: 6,
+            paddingHorizontal: 4,
+        },
+        pickerBackText: {
+            color: palette.deepBlue,
+            fontWeight: "700",
+            fontSize: 13,
+        },
+        pickerTitle: {
+            color: palette.textPrimary,
+            fontSize: 17,
+            fontWeight: "800",
+        },
+        pickerScroll: {
+            flex: 1,
+        },
+        pickerScrollContent: {
+            paddingBottom: 16,
+            gap: 8,
+        },
+        pickerOption: {
+            borderWidth: 1,
+            borderColor: palette.borderSoft,
+            backgroundColor: palette.surface,
+            borderRadius: 14,
+            paddingHorizontal: 12,
+            paddingVertical: 12,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+        },
+        pickerOptionSelected: {
+            borderColor: palette.emerald,
+            backgroundColor: "rgba(37, 201, 122, 0.12)",
+        },
+        pickerOptionPressed: {
+            opacity: 0.9,
+        },
+        pickerOptionText: {
+            color: palette.textPrimary,
+            fontSize: 15,
+            fontWeight: "700",
+        },
+        pickerOptionTextSelected: {
+            color: palette.emerald,
         },
     });
 }
