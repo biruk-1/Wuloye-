@@ -11,6 +11,10 @@ export const endpoints = {
 	devUser: "/dev/user",
 	devInteractions: "/dev/interactions",
 	devModel: "/dev/model",
+	devSystem: "/dev/system",
+	devSystemExperiment: "/dev/system/experiment",
+	devSystemFallback: "/dev/system/fallback",
+	devSeed: "/dev/seed",
 };
 
 export async function getHealth() {
@@ -72,5 +76,37 @@ export async function getModelStatus() {
 		throw new Error("Model status is only available in development mode");
 	}
 	const response = await apiClient.get(endpoints.devModel);
+	return response.data;
+}
+
+export async function getSystemStatus() {
+	if (!import.meta.env.DEV) {
+		throw new Error("System controls are only available in development mode");
+	}
+	const response = await apiClient.get(endpoints.devSystem);
+	return response.data;
+}
+
+export async function setExperimentActive(enabled) {
+	if (!import.meta.env.DEV) {
+		throw new Error("System controls are only available in development mode");
+	}
+	const response = await apiClient.post(endpoints.devSystemExperiment, { enabled });
+	return response.data;
+}
+
+export async function setFallbackMode(enabled) {
+	if (!import.meta.env.DEV) {
+		throw new Error("System controls are only available in development mode");
+	}
+	const response = await apiClient.post(endpoints.devSystemFallback, { enabled });
+	return response.data;
+}
+
+export async function runSeed() {
+	if (!import.meta.env.DEV) {
+		throw new Error("Seeding is only available in development mode");
+	}
+	const response = await apiClient.post(endpoints.devSeed);
 	return response.data;
 }

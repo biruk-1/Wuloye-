@@ -19,6 +19,9 @@ import {
   userLookupHandler,
   interactionsLookupHandler,
   modelStatusHandler,
+  systemStatusHandler,
+  setExperimentHandler,
+  setFallbackHandler,
 } from "../controllers/dev.controller.js";
 
 const router = Router();
@@ -39,6 +42,9 @@ router.use((req, res, next) => {
 // POST /api/dev/seed-places
 router.post("/seed-places", seedPlacesHandler);
 
+// POST /api/dev/seed
+router.post("/seed", seedPlacesHandler);
+
 // GET  /api/dev/places
 router.get("/places", listPlacesHandler);
 
@@ -53,5 +59,14 @@ router.get("/interactions", interactionsLookupHandler);
 
 // GET /api/dev/model
 router.get("/model", modelStatusHandler);
+
+// GET /api/dev/system
+router.get("/system", systemStatusHandler);
+
+// POST /api/dev/system/experiment
+router.post("/system/experiment", setExperimentHandler);
+
+// POST /api/dev/system/fallback
+router.post("/system/fallback", setFallbackHandler);
 
 export default router;
