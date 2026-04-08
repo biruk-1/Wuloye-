@@ -10,6 +10,7 @@ import { seedPlacesIfEmpty, getAllPlaces } from "../services/place.service.js";
 import { SEED_PLACES } from "../data/places.seed.js";
 import { aggregateExperimentMetrics, getInteractionsByUser } from "../services/interaction.service.js";
 import { getUserByEmail, getUserById } from "../services/user.service.js";
+import { loadModel, isLoaded } from "../services/ai/modelService.js";
 
 /**
  * POST /api/dev/seed-places
@@ -166,6 +167,28 @@ export const interactionsLookupHandler = async (req, res, next) => {
       success: true,
       data: interactions,
       message: "Interactions retrieved",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/model
+ *
+ * Returns the current model metadata and weights for inspection.
+ */
+export const modelStatusHandler = async (_req, res, next) => {
+  try {
+    const model = loadModel();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...model,
+        modelActive: isLoaded(),
+      },
+      message: "Model status retrieved",
     });
   } catch (error) {
     next(error);

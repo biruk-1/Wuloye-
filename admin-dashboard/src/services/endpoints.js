@@ -10,6 +10,7 @@ export const endpoints = {
 	experiments: "/dev/experiment-metrics",
 	devUser: "/dev/user",
 	devInteractions: "/dev/interactions",
+	devModel: "/dev/model",
 };
 
 export async function getHealth() {
@@ -63,5 +64,13 @@ export async function getRoutines() {
 
 export async function getExperimentMetrics() {
 	const response = await apiClient.get(endpoints.experiments);
+	return response.data;
+}
+
+export async function getModelStatus() {
+	if (!import.meta.env.DEV) {
+		throw new Error("Model status is only available in development mode");
+	}
+	const response = await apiClient.get(endpoints.devModel);
 	return response.data;
 }

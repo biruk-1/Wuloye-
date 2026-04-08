@@ -18,6 +18,7 @@ import {
   experimentMetricsHandler,
   userLookupHandler,
   interactionsLookupHandler,
+  modelStatusHandler,
 } from "../controllers/dev.controller.js";
 
 const router = Router();
@@ -49,5 +50,8 @@ router.get("/user", userLookupHandler);
 
 // GET /api/dev/interactions?uid=... or ?email=...&limit=50
 router.get("/interactions", interactionsLookupHandler);
+
+// GET /api/dev/model
+router.get("/model", modelStatusHandler);
 
 export default router;
