@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
+import { LoadingState } from "@/components/ui/loading";
 import { cn } from "@/utils/cn";
 import { getSystemStatus, runSeed, setExperimentActive, setFallbackMode } from "@/services/endpoints";
 
@@ -112,10 +114,10 @@ export default function SystemPage() {
       </div>
 
       {systemQuery.isError && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-          {getFriendlyError(systemQuery.error)}
-        </div>
+        <Alert variant="error">{getFriendlyError(systemQuery.error)}</Alert>
       )}
+
+      {systemQuery.isLoading && <LoadingState label="Loading system controls..." />}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

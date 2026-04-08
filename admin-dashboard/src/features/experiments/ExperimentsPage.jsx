@@ -4,6 +4,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Alert } from "@/components/ui/alert";
+import { LoadingState } from "@/components/ui/loading";
 import { getExperimentMetrics } from "@/services/endpoints";
 
 function formatPercent(value) {
@@ -63,10 +65,10 @@ export default function ExperimentsPage() {
       </div>
 
       {metricsQuery.isError && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-          {getFriendlyError(metricsQuery.error)}
-        </div>
+        <Alert variant="error">{getFriendlyError(metricsQuery.error)}</Alert>
       )}
+
+      {metricsQuery.isLoading && <LoadingState label="Loading experiment metrics..." />}
 
       <Card>
         <CardHeader>

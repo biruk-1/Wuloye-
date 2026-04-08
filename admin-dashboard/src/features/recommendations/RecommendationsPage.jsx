@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert } from "@/components/ui/alert";
+import { LoadingState } from "@/components/ui/loading";
 import { getRecommendations } from "@/services/endpoints";
 
 const HIGHLIGHT_KEYS = ["modelscore", "modelboost", "explorationboost", "intentboost", "intentmatch"];
@@ -61,9 +63,7 @@ export default function RecommendationsPage() {
       </div>
 
       {recQuery.isError && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
-          {getFriendlyError(recQuery.error)}
-        </div>
+        <Alert variant="error">{getFriendlyError(recQuery.error)}</Alert>
       )}
 
       <Card>
@@ -71,7 +71,7 @@ export default function RecommendationsPage() {
           <CardTitle>Ranked Results</CardTitle>
         </CardHeader>
         <CardContent>
-          {recQuery.isLoading && <p className="text-sm text-slate-500">Loading recommendations...</p>}
+          {recQuery.isLoading && <LoadingState label="Loading recommendations..." />}
           {!recQuery.isLoading && recommendations.length === 0 && (
             <p className="text-sm text-slate-500">Click “Fetch Debug” to load recommendations.</p>
           )}

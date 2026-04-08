@@ -23,6 +23,7 @@ import {
   setExperimentHandler,
   setFallbackHandler,
 } from "../controllers/dev.controller.js";
+import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
 
 const router = Router();
 
@@ -38,6 +39,8 @@ router.use((req, res, next) => {
   }
   next();
 });
+
+router.use(authenticate, requireAdmin);
 
 // POST /api/dev/seed-places
 router.post("/seed-places", seedPlacesHandler);
