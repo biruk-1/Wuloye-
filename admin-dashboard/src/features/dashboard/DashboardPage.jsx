@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetch } from "@/hooks/useFetch";
 import { endpoints } from "@/services/endpoints";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 
@@ -104,10 +105,18 @@ export default function DashboardPage() {
     <section>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-2xl font-bold text-slate-900">Dashboard</h3>
-          <p className="text-sm text-slate-500">Live system telemetry updated at {updatedAt}.</p>
+          <h3 className="text-2xl font-bold text-slate-900">System Health</h3>
+          <p className="text-sm text-slate-500">Real-time system status and performance metrics.</p>
         </div>
-        <Badge variant={getBadgeVariant(status)}>{status}</Badge>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            healthQuery.refetch();
+            metricsQuery.refetch();
+          }}
+        >
+          Refresh
+        </Button>
       </div>
 
       <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
