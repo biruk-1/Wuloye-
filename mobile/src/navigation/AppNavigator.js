@@ -1,97 +1,91 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
+import { useMemo } from "react";
+import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../context/AuthContext";
 import LoginScreen from "../screens/LoginScreen";
 import ProfileSetupScreen from "../screens/ProfileSetupScreen";
 import PlaceDetailScreen from "../screens/PlaceDetailScreen";
+import ActivityRecommendationsScreen from "../screens/ActivityRecommendationsScreen";
 import SplashScreen from "../screens/SplashScreen";
 import RoutineBuilderScreen from "../screens/RoutineBuilderScreen";
 import MainTabs from "./MainTabs";
+import { useAppTheme } from "../context/ThemeContext";
 
 const Stack = createNativeStackNavigator();
 
-/** User has interests → they completed onboarding. */
+/**
+ * Legacy users: non-empty `interests` counts as onboarded.
+ * New flow: weekly activities, meal prefs, and a numeric weekly budget must be set.
+ */
 function hasCompletedOnboarding(profile) {
-    const interests = profile?.interests;
-    return Array.isArray(interests) && interests.length > 0;
+    if (Array.isArray(profile?.interests) && profile.interests.length > 0) {
+        return true;
+    }
+    const wa = profile?.weeklyActivities;
+    const mp = profile?.mealPreferences;
+    const wb = profile?.weeklyBudget;
+    return (
+        Array.isArray(wa) &&
+        wa.length > 0 &&
+        Array.isArray(mp) &&
+        mp.length > 0 &&
+        typeof wb === "number" &&
+        wb > 0
+    );
 }
 
 /**
  * Shown when the app is authenticated but GET /api/profile failed (network error,
  * server unreachable, etc.). Allows the user to retry or sign out.
  */
-function ProfileErrorScreen({ onRetry, onSignOut, message }) {
+function ProfileErrorScreen({
+    onRetry,
+    onSignOut,
+    message,
+    palette,
+    gradients,
+    /** Not named `styles` — Hermes can throw "Property 'styles' doesn't exist". */
+    styleSheet,
+}) {
     return (
-        <View style={errStyles.container}>
-            <View style={errStyles.iconWrap}>
-                <Ionicons name="cloud-offline-outline" size={46} color="#F7C72C" />
+        <View style={styleSheet.container}>
+            <View style={styleSheet.iconWrap}>
+                <Ionicons
+                    name="cloud-offline-outline"
+                    size={46}
+                    color={palette.oceanBlue}
+                />
             </View>
-            <Text style={errStyles.title}>Could not connect</Text>
-            <Text style={errStyles.body}>
-                {message ?? "We couldn't reach the server. Check your connection and try again."}
+            <Text style={styleSheet.title}>Could not connect</Text>
+            <Text style={styleSheet.body}>
+                {message ??
+                    "We couldn't reach the server. Check your connection and try again."}
             </Text>
-            <Pressable style={errStyles.retryBtn} onPress={onRetry}>
-                <Text style={errStyles.retryText}>Retry</Text>
+            <Pressable style={styleSheet.retryBtnWrap} onPress={onRetry}>
+                <LinearGradient
+                    colors={gradients.primaryButtonMint}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styleSheet.retryBtn}
+                >
+                    <Text style={styleSheet.retryText}>Retry</Text>
+                </LinearGradient>
             </Pressable>
-            <Pressable style={errStyles.signOutBtn} onPress={onSignOut}>
-                <Text style={errStyles.signOutText}>Sign out</Text>
+            <Pressable style={styleSheet.signOutBtn} onPress={onSignOut}>
+                <Text style={styleSheet.signOutText}>Sign out</Text>
             </Pressable>
         </View>
     );
 }
 
-const errStyles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#050A17",
-        alignItems: "center",
-        justifyContent: "center",
-        paddingHorizontal: 32,
-    },
-    iconWrap: { marginBottom: 20 },
-    title: {
-        color: "#EAF0FA",
-        fontSize: 26,
-        fontWeight: "800",
-        textAlign: "center",
-    },
-    body: {
-        marginTop: 10,
-        color: "#8EA2C2",
-        fontSize: 15,
-        lineHeight: 22,
-        textAlign: "center",
-    },
-    retryBtn: {
-        marginTop: 28,
-        width: "100%",
-        height: 52,
-        borderRadius: 14,
-        backgroundColor: "#F7C72C",
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    retryText: {
-        color: "#1E1E1E",
-        fontWeight: "800",
-        fontSize: 15,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-    },
-    signOutBtn: {
-        marginTop: 14,
-        padding: 10,
-    },
-    signOutText: {
-        color: "#6E82A6",
-        fontSize: 13,
-    },
-});
-
 // ─── Navigator ────────────────────────────────────────────────────────────────
 
 export default function AppNavigator() {
+    const { palette, gradients } = useAppTheme();
+    const errStyles = useMemo(() => createErrStyles(palette), [palette]);
+
     const { user, ready, profile, profileError, retryProfileLoad, clearAuth } =
         useAuth();
 
@@ -104,7 +98,10 @@ export default function AppNavigator() {
     if (!user) {
         return (
             <Stack.Navigator
-                screenOptions={{ headerShown: false, contentStyle: { backgroundColor: "#050B17" } }}
+                screenOptions={{
+                    headerShown: false,
+                    contentStyle: { backgroundColor: palette.pageTop },
+                }}
             >
                 <Stack.Screen name="Login" component={LoginScreen} />
             </Stack.Navigator>
@@ -118,6 +115,9 @@ export default function AppNavigator() {
                 message={profileError}
                 onRetry={retryProfileLoad}
                 onSignOut={clearAuth}
+                palette={palette}
+                gradients={gradients}
+                styleSheet={errStyles}
             />
         );
     }
@@ -138,15 +138,76 @@ export default function AppNavigator() {
             initialRouteName={initialRouteName}
             screenOptions={{
                 headerShown: false,
-                contentStyle: { backgroundColor: "#050B17" },
+                contentStyle: { backgroundColor: palette.pageTop },
             }}
         >
             <Stack.Screen name="ProfileSetup" component={ProfileSetupScreen} />
-            <Stack.Screen name="RoutineBuilder" component={RoutineBuilderScreen} />
+            <Stack.Screen
+                name="RoutineBuilder"
+                component={RoutineBuilderScreen}
+            />
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="PlaceDetail" component={PlaceDetailScreen} />
+            <Stack.Screen
+                name="ActivityRecommendations"
+                component={ActivityRecommendationsScreen}
+            />
             {/* Keep Login in the stack so back-navigation works in edge cases */}
             <Stack.Screen name="Login" component={LoginScreen} />
         </Stack.Navigator>
     );
+}
+
+function createErrStyles(palette) {
+    return StyleSheet.create({
+        container: {
+            flex: 1,
+            backgroundColor: palette.pageTop,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: 32,
+        },
+        iconWrap: { marginBottom: 20 },
+        title: {
+            color: palette.textPrimary,
+            fontSize: 26,
+            fontWeight: "800",
+            textAlign: "center",
+        },
+        body: {
+            marginTop: 10,
+            color: palette.textSecondary,
+            fontSize: 15,
+            lineHeight: 22,
+            textAlign: "center",
+        },
+        retryBtnWrap: {
+            marginTop: 28,
+            width: "100%",
+            height: 52,
+            borderRadius: 14,
+            overflow: "hidden",
+        },
+        retryBtn: {
+            flex: 1,
+            borderRadius: 14,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        retryText: {
+            color: palette.iceWhite,
+            fontWeight: "800",
+            fontSize: 15,
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+        },
+        signOutBtn: {
+            marginTop: 14,
+            padding: 10,
+        },
+        signOutText: {
+            color: palette.textMuted,
+            fontSize: 13,
+        },
+    });
 }

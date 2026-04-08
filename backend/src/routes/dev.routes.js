@@ -16,7 +16,14 @@ import {
   seedPlacesHandler,
   listPlacesHandler,
   experimentMetricsHandler,
+  userLookupHandler,
+  interactionsLookupHandler,
+  modelStatusHandler,
+  systemStatusHandler,
+  setExperimentHandler,
+  setFallbackHandler,
 } from "../controllers/dev.controller.js";
+import { authenticate, requireAdmin } from "../middleware/auth.middleware.js";
 
 const router = Router();
 
@@ -33,13 +40,36 @@ router.use((req, res, next) => {
   next();
 });
 
+router.use(authenticate, requireAdmin);
+
 // POST /api/dev/seed-places
 router.post("/seed-places", seedPlacesHandler);
+
+// POST /api/dev/seed
+router.post("/seed", seedPlacesHandler);
 
 // GET  /api/dev/places
 router.get("/places", listPlacesHandler);
 
 // GET  /api/dev/experiment-metrics
 router.get("/experiment-metrics", experimentMetricsHandler);
+
+// GET /api/dev/user?uid=... or ?email=...
+router.get("/user", userLookupHandler);
+
+// GET /api/dev/interactions?uid=... or ?email=...&limit=50
+router.get("/interactions", interactionsLookupHandler);
+
+// GET /api/dev/model
+router.get("/model", modelStatusHandler);
+
+// GET /api/dev/system
+router.get("/system", systemStatusHandler);
+
+// POST /api/dev/system/experiment
+router.post("/system/experiment", setExperimentHandler);
+
+// POST /api/dev/system/fallback
+router.post("/system/fallback", setFallbackHandler);
 
 export default router;

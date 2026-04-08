@@ -1,13 +1,28 @@
-import { useMemo } from "react";
+import { useAuthContext } from "@/context/AuthContext";
 
 export function useAuth() {
-  const token = window.localStorage.getItem("adminToken");
+  const context = useAuthContext();
+  if (context) return context;
 
-  return useMemo(
-    () => ({
-      isAuthenticated: Boolean(token),
-      token,
-    }),
-    [token]
-  );
+  const token = window.localStorage.getItem("adminToken") || "";
+
+  const setToken = (value) => {
+    const nextToken = (value || "").trim();
+    if (nextToken) {
+      window.localStorage.setItem("adminToken", nextToken);
+    } else {
+      window.localStorage.removeItem("adminToken");
+    }
+  };
+
+  const clearToken = () => {
+    window.localStorage.removeItem("adminToken");
+  };
+
+  return {
+    token,
+    isAuthenticated: Boolean(token),
+    setToken,
+    clearToken,
+  };
 }

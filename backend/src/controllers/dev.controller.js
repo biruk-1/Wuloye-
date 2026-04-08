@@ -8,7 +8,15 @@
 
 import { seedPlacesIfEmpty, getAllPlaces } from "../services/place.service.js";
 import { SEED_PLACES } from "../data/places.seed.js";
-import { aggregateExperimentMetrics } from "../services/interaction.service.js";
+import { aggregateExperimentMetrics, getInteractionsByUser } from "../services/interaction.service.js";
+import { getUserByEmail, getUserById } from "../services/user.service.js";
+import { loadModel, isLoaded } from "../services/ai/modelService.js";
+
+const parseBoolean = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return null;
+};
 
 /**
  * POST /api/dev/seed-places
@@ -82,6 +90,185 @@ export const experimentMetricsHandler = async (req, res, next) => {
       success: true,
       data,
       message: "Experiment metrics aggregated",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/user?uid=... or ?email=...
+ *
+ * Dev-only lookup for a user profile by UID or email.
+ */
+export const userLookupHandler = async (req, res, next) => {
+  try {
+    const uid = typeof req.query.uid === "string" ? req.query.uid.trim() : "";
+    const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
+
+    if (!uid && !email) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "Provide uid or email query parameter",
+      });
+    }
+
+    const user = uid ? await getUserById(uid) : await getUserByEmail(email);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        data: null,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: user,
+      message: "User profile retrieved",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/interactions?uid=... or ?email=...&limit=50
+ *
+ * Dev-only lookup for recent interactions by user.
+ */
+export const interactionsLookupHandler = async (req, res, next) => {
+  try {
+    const uid = typeof req.query.uid === "string" ? req.query.uid.trim() : "";
+    const email = typeof req.query.email === "string" ? req.query.email.trim() : "";
+    const limitRaw = parseInt(String(req.query.limit ?? "50"), 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(200, Math.max(1, limitRaw)) : 50;
+
+    if (!uid && !email) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "Provide uid or email query parameter",
+      });
+    }
+
+    let targetUid = uid;
+    if (!targetUid && email) {
+      const user = await getUserByEmail(email);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          data: null,
+          message: "User not found",
+        });
+      }
+      targetUid = user.uid;
+    }
+
+    const interactions = await getInteractionsByUser(targetUid, limit);
+
+    return res.status(200).json({
+      success: true,
+      data: interactions,
+      message: "Interactions retrieved",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/model
+ *
+ * Returns the current model metadata and weights for inspection.
+ */
+export const modelStatusHandler = async (_req, res, next) => {
+  try {
+    const model = loadModel();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        ...model,
+        modelActive: isLoaded(),
+      },
+      message: "Model status retrieved",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /api/dev/system
+ *
+ * Returns current runtime control flags.
+ */
+export const systemStatusHandler = async (_req, res, next) => {
+  try {
+    return res.status(200).json({
+      success: true,
+      data: {
+        experimentActive: process.env.EXPERIMENT_ACTIVE === "true",
+        fallbackEnabled: process.env.RECOMMENDATION_FALLBACK_ENABLED === "true",
+      },
+      message: "System status retrieved",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/dev/system/experiment
+ * Body: { enabled: boolean }
+ */
+export const setExperimentHandler = async (req, res, next) => {
+  try {
+    const enabled = parseBoolean(req.body?.enabled);
+    if (enabled === null) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "Field 'enabled' must be boolean",
+      });
+    }
+
+    process.env.EXPERIMENT_ACTIVE = enabled ? "true" : "false";
+
+    return res.status(200).json({
+      success: true,
+      data: { experimentActive: enabled },
+      message: enabled ? "Experiments enabled" : "Experiments disabled",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * POST /api/dev/system/fallback
+ * Body: { enabled: boolean }
+ */
+export const setFallbackHandler = async (req, res, next) => {
+  try {
+    const enabled = parseBoolean(req.body?.enabled);
+    if (enabled === null) {
+      return res.status(400).json({
+        success: false,
+        data: null,
+        message: "Field 'enabled' must be boolean",
+      });
+    }
+
+    process.env.RECOMMENDATION_FALLBACK_ENABLED = enabled ? "true" : "false";
+
+    return res.status(200).json({
+      success: true,
+      data: { fallbackEnabled: enabled },
+      message: enabled ? "Fallback mode enabled" : "Fallback mode disabled",
     });
   } catch (error) {
     next(error);

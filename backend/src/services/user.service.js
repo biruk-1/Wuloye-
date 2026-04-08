@@ -17,6 +17,11 @@
  *     interests          {string[]}       — activity/interest tags
  *     budgetRange        {string}         — "low" | "medium" | "high"
  *     locationPreference {string}         — "indoor" | "outdoor" | "any"
+ *     sleepTime          {string}         — "HH:mm" (24h)
+ *     wakeTime           {string}         — "HH:mm" (24h)
+ *     weeklyActivities   {string[]}       — e.g. gym, work, study
+ *     mealPreferences    {string[]}       — meal style tags
+ *     weeklyBudget       {number}         — numeric weekly spend signal
  *     typeAffinity       {object}         — { [placeType]: number } persistent affinity scores (v6)
  *     seenPlaces         {string[]}       — ordered list of place ids the user has engaged with
  *     embedding          {object}         — { [dimension]: float 0-1 } long-term taste vector (v9)
@@ -90,6 +95,24 @@ export const getUserById = async (uid) => {
 };
 
 /**
+ * Retrieves a user document by email address.
+ *
+ * @param {string} email
+ * @returns {Promise<object|null>}
+ */
+export const getUserByEmail = async (email) => {
+  if (!email) return null;
+  const snapshot = await db
+    .collection(USERS_COLLECTION)
+    .where("email", "==", email)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].data();
+};
+
+/**
  * Updates mutable profile fields for an existing user.
  *
  * Only the keys present in `updates` are written — Firestore's update()
@@ -101,6 +124,11 @@ export const getUserById = async (uid) => {
  *   interests          {string[]}  — list of activity/interest tags
  *   budgetRange        {string}    — e.g. "low" | "medium" | "high"
  *   locationPreference {string}    — e.g. "indoor" | "outdoor" | "any"
+ *   sleepTime          {string}
+ *   wakeTime           {string}
+ *   weeklyActivities   {string[]}
+ *   mealPreferences    {string[]}
+ *   weeklyBudget       {number}
  *
  * @param {string} uid     — Firebase Auth UID (from verified token, never from body)
  * @param {object} updates — validated fields to merge

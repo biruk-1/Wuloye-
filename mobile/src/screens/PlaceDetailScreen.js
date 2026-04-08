@@ -9,11 +9,16 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useMemo } from "react";
 import { createInteraction } from "../api/interactionApi";
 import { INTERACTION_TYPES } from "../utils/constants";
 import { getApiErrorMessage } from "../utils/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 export default function PlaceDetailScreen({ navigation, route }) {
+    const { palette, gradients } = useAppTheme();
+    const styles = useMemo(() => createStyles(palette), [palette]);
+
     const place = route?.params?.place;
 
     async function logAction(actionType, successMessage) {
@@ -38,7 +43,7 @@ export default function PlaceDetailScreen({ navigation, route }) {
     return (
         <SafeAreaView style={styles.safeArea}>
             <LinearGradient
-                colors={["#0B1529", "#071326", "#050A17"]}
+                colors={gradients.appBackground}
                 style={styles.screen}
             >
                 <ScrollView
@@ -53,7 +58,7 @@ export default function PlaceDetailScreen({ navigation, route }) {
                             <Ionicons
                                 name="chevron-back"
                                 size={18}
-                                color="#EFF4FC"
+                                color={palette.iceWhite}
                             />
                         </Pressable>
                         <View style={styles.heroOverlay}>
@@ -105,11 +110,15 @@ export default function PlaceDetailScreen({ navigation, route }) {
                             navigation.goBack();
                         }}
                     >
-                        <Ionicons name="close" size={16} color="#D6E0F0" />
+                        <Ionicons
+                            name="close"
+                            size={16}
+                            color={palette.deepBlue}
+                        />
                         <Text style={styles.dismissText}>Not interested</Text>
                     </Pressable>
                     <Pressable
-                        style={styles.saveBtn}
+                        style={styles.saveBtnWrap}
                         onPress={() =>
                             logAction(
                                 INTERACTION_TYPES.SAVE,
@@ -117,8 +126,19 @@ export default function PlaceDetailScreen({ navigation, route }) {
                             )
                         }
                     >
-                        <Ionicons name="heart" size={16} color="#1F1F1F" />
-                        <Text style={styles.saveText}>Save this place</Text>
+                        <LinearGradient
+                            colors={gradients.primaryButton}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.saveBtn}
+                        >
+                            <Ionicons
+                                name="heart"
+                                size={16}
+                                color={palette.iceWhite}
+                            />
+                            <Text style={styles.saveText}>Save this place</Text>
+                        </LinearGradient>
                     </Pressable>
                 </View>
             </LinearGradient>
@@ -126,128 +146,139 @@ export default function PlaceDetailScreen({ navigation, route }) {
     );
 }
 
-const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: "#050A17" },
-    screen: { flex: 1 },
-    scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
-    heroCard: {
-        marginTop: 8,
-        borderRadius: 22,
-        height: 290,
-        overflow: "hidden",
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
-        backgroundColor: "#121822",
-    },
-    backButton: {
-        position: "absolute",
-        top: 14,
-        left: 14,
-        width: 34,
-        height: 34,
-        borderRadius: 17,
-        backgroundColor: "rgba(0,0,0,0.45)",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 4,
-    },
-    heroOverlay: {
-        position: "absolute",
-        bottom: 16,
-        left: 16,
-        right: 16,
-    },
-    scoreBadge: {
-        alignSelf: "flex-start",
-        backgroundColor: "rgba(247,199,44,0.2)",
-        color: "#FCE58B",
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        fontSize: 11,
-        fontWeight: "800",
-    },
-    title: {
-        marginTop: 12,
-        color: "#F2F7FD",
-        fontSize: 38,
-        lineHeight: 41,
-        fontWeight: "800",
-    },
-    type: {
-        marginTop: 6,
-        color: "#9FB3CE",
-        fontSize: 13,
-        textTransform: "uppercase",
-        letterSpacing: 0.6,
-        fontWeight: "700",
-    },
-    infoCard: {
-        marginTop: 12,
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.1)",
-        backgroundColor: "rgba(255,255,255,0.04)",
-        padding: 14,
-    },
-    sectionLabel: {
-        color: "#F7C72C",
-        fontSize: 11,
-        fontWeight: "800",
-        textTransform: "uppercase",
-        letterSpacing: 0.9,
-    },
-    bodyText: {
-        marginTop: 8,
-        color: "#A3B5CE",
-        fontSize: 14,
-        lineHeight: 21,
-    },
-    valueText: {
-        marginTop: 6,
-        color: "#F4D065",
-        fontSize: 30,
-        fontWeight: "800",
-    },
-    bottomActions: {
-        position: "absolute",
-        left: 16,
-        right: 16,
-        bottom: 22,
-        flexDirection: "row",
-        gap: 10,
-    },
-    dismissBtn: {
-        flex: 1,
-        height: 52,
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.16)",
-        backgroundColor: "rgba(255,255,255,0.04)",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 7,
-    },
-    dismissText: {
-        color: "#D6E0F0",
-        fontSize: 13,
-        fontWeight: "700",
-    },
-    saveBtn: {
-        flex: 1.1,
-        height: 52,
-        borderRadius: 16,
-        backgroundColor: "#F7C72C",
-        alignItems: "center",
-        justifyContent: "center",
-        flexDirection: "row",
-        gap: 7,
-    },
-    saveText: {
-        color: "#1E1E1E",
-        fontSize: 13,
-        fontWeight: "800",
-        textTransform: "uppercase",
-    },
-});
+function createStyles(palette) {
+    return StyleSheet.create({
+        safeArea: { flex: 1, backgroundColor: palette.pageTop },
+        screen: { flex: 1 },
+        scrollContent: { paddingHorizontal: 16, paddingBottom: 120 },
+        heroCard: {
+            marginTop: 8,
+            borderRadius: 22,
+            height: 290,
+            overflow: "hidden",
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surface,
+        },
+        backButton: {
+            position: "absolute",
+            top: 14,
+            left: 14,
+            width: 34,
+            height: 34,
+            borderRadius: 17,
+            backgroundColor: "rgba(23, 111, 178, 0.78)",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 4,
+        },
+        heroOverlay: {
+            position: "absolute",
+            bottom: 16,
+            left: 16,
+            right: 16,
+        },
+        scoreBadge: {
+            alignSelf: "flex-start",
+            backgroundColor: "rgba(38, 201, 122, 0.18)",
+            color: palette.emerald,
+            borderRadius: 999,
+            paddingHorizontal: 10,
+            paddingVertical: 5,
+            fontSize: 11,
+            fontWeight: "800",
+        },
+        title: {
+            marginTop: 12,
+            color: palette.textPrimary,
+            fontSize: 38,
+            lineHeight: 41,
+            fontWeight: "800",
+        },
+        type: {
+            marginTop: 6,
+            color: palette.textSecondary,
+            fontSize: 13,
+            textTransform: "uppercase",
+            letterSpacing: 0.6,
+            fontWeight: "700",
+        },
+        infoCard: {
+            marginTop: 12,
+            borderRadius: 18,
+            borderWidth: 1,
+            borderColor: palette.borderSoft,
+            backgroundColor: palette.surfaceStrong,
+            padding: 14,
+        },
+        sectionLabel: {
+            color: palette.oceanBlue,
+            fontSize: 11,
+            fontWeight: "800",
+            textTransform: "uppercase",
+            letterSpacing: 0.9,
+        },
+        bodyText: {
+            marginTop: 8,
+            color: palette.textSecondary,
+            fontSize: 14,
+            lineHeight: 21,
+        },
+        valueText: {
+            marginTop: 6,
+            color: palette.emerald,
+            fontSize: 30,
+            fontWeight: "800",
+        },
+        bottomActions: {
+            position: "absolute",
+            left: 16,
+            right: 16,
+            bottom: 22,
+            flexDirection: "row",
+            gap: 10,
+        },
+        dismissBtn: {
+            flex: 1,
+            height: 52,
+            borderRadius: 16,
+            borderWidth: 1,
+            borderColor: palette.borderStrong,
+            backgroundColor: palette.surfaceStrong,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 7,
+        },
+        dismissText: {
+            color: palette.deepBlue,
+            fontSize: 13,
+            fontWeight: "700",
+        },
+        saveBtnWrap: {
+            flex: 1.1,
+            borderRadius: 16,
+            overflow: "hidden",
+        },
+        saveBtn: {
+            flex: 1,
+            height: 52,
+            borderRadius: 16,
+            alignItems: "center",
+            justifyContent: "center",
+            flexDirection: "row",
+            gap: 7,
+            shadowColor: "#2EA9FF",
+            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: 0.24,
+            shadowRadius: 14,
+            elevation: 7,
+        },
+        saveText: {
+            color: palette.iceWhite,
+            fontSize: 13,
+            fontWeight: "800",
+            textTransform: "uppercase",
+        },
+    });
+}
